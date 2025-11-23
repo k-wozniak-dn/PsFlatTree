@@ -1,6 +1,11 @@
 @{
 	'TA' = 
 		@{
+			'Path' = $null;
+		};
+	'TAM' = 
+		@{
+			'Path' = 'type=s;';
 		};
 	'0' =
 		@{
@@ -10,7 +15,14 @@
 					'Name' = 'Root';
 					'NextId' = 3;
 				};
+		'SAM' = 
+				@{
+					'Id' = 'type=s;';
+					'Name' = 'type=s;';
+					'NextId' = 'type=i;';
+				};
 		'A' = @{};
+		'AM' = @{};
 		'Idx' = 
 				@(
 					'0:1';
@@ -34,9 +46,16 @@
 					'Id' = '0:1';
 					'Idx' = 0;
 					'Name' = 'Item_1';
-					'ParentId' = '0';
+				};
+		'SAM' = 
+				@{
+					'Id' = 'type=s;';
+					'Name' = 'type=s;';
+					'NextId' = 'type=i;';
+					'Idx' = 'type=i;';
 				};
 		'A' = @{};
+		'AM' = @{};
 		'Idx' = @();
 		'IdIdxMap' = @{};
 		'NameIdMap' = @{};
@@ -48,9 +67,16 @@
 					'Id' = '0:2';
 					'Idx' = 1;
 					'Name' = 'Item_2';
-					'ParentId' = '0';
+				};
+		'SAM' = 
+			@{
+					'Id' = 'type=s;';
+					'Name' = 'type=s;';
+					'NextId' = 'type=i;';
+					'Idx' = 'type=i;';
 				};
 		'A' = @{};
+		'AM' = @{};
 		'Idx' = @();
 		'IdIdxMap' = @{};
 		'NameIdMap' = @{};
