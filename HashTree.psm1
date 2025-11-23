@@ -1,11 +1,25 @@
 #region const
-enum FileFormatEnum {psd1; json; xml; csv; }
-enum ValueType { ht; s; i; dbl; b; }
+enum FileFormat {psd1; json; xml; csv; }
+enum TreeSection { TA; TAM }
+enum NodeSection { SA; SAM; A; AM; Idx; IdIdxMap; NameIdMap  }
+enum ValueSfx { s; i; dbl; b; }
 
-Set-Variable -Name 'PathDelimiter' -Value ':' -Option ReadOnly
+# Path delimiter
+Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly
+
+Set-Variable -Name 'TA' -Value "$([TreeSection]::TA)" -Option ReadOnly
+Set-Variable -Name 'TAM' -Value "$([TreeSection]::TAM)" -Option ReadOnly
+Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly
+Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly
+Set-Variable -Name 'SAM' -Value "$([NodeSection]::SAM)" -Option ReadOnly
+Set-Variable -Name 'AM' -Value "$([NodeSection]::AM)" -Option ReadOnly
+Set-Variable -Name 'Idx' -Value "$([NodeSection]::Idx)" -Option ReadOnly
+Set-Variable -Name 'IdIdxMap' -Value "$([NodeSection]::IdIdxMap)" -Option ReadOnly
+Set-Variable -Name 'NameIdMap' -Value "$([NodeSection]::NameIdMap)" -Option ReadOnly
+
 #endregion
 
-#region tools
+#region shared
 function Copy-HashtableDeep {
     [CmdletBinding()]
     param (
@@ -20,7 +34,7 @@ function Copy-HashtableDeep {
 #endregion
 
 #region path
-function ConvertTo-NPath {
+function ConvertTo-htPath {
     param (
         [Parameter(Mandatory = $true)] [Alias("P")]
         [string] $Path,
@@ -40,9 +54,12 @@ function ConvertTo-NPath {
         PropertyPart = $count -gt 2 ? $parts[2] : $null ;
         ParentPath = ($count -eq 1) ? $null : (($count -eq 2) ? $parts[0] : $parts[0] + $PathDelimiter + $parts[1]); 
         FullPath = $Path;
-    }        
+    }
 }
-Export-ModuleMember -Function:ConvertTo-DNPath
+Set-Alias -Name:htp -Value:New-Node
+Export-ModuleMember -Function:ConvertTo-htPath
+Export-ModuleMember -Alias:htp
+
 #endregion
 
 #region new
@@ -54,15 +71,19 @@ function New-Node {
     )
 
     $nn = @{ 
-        SA = @{
-            Name = $Name;
-            ParentId = $null;
-            NextId = 1;
+        $SA = @{
+            'Name' = $Name;
+            'NextId' = 1;
         };
-        A = @{};
-        Idx = @();
-        IdIdxMap = @{};
-        NameIdMap = @{}; 
+        $SAM = @{
+            'Name' = "type=s;";
+            'NextId' = "type=i;";
+        };
+        $A = @{};
+        $AM = @{};
+        $Idx = @();
+        $IdIdxMap = @{};
+        $NameIdMap = @{}; 
     }
 
     return $nn
@@ -79,13 +100,14 @@ function New-Tree {
     )
 
     $root = (nn -Name:"Root");
-    $root.SA.Id = "0";
+    $root.$SA.Id = "0";
+    $root.$SAM.Id = "type=s;";
 
     $t = @{ 
-        "TA" = @{
-            "Path" = $Path;
+        $TA = @{
+            Path = $Path;
         };
-        "0" = $root;
+        '0' = $root;
     }
 
     return $t
@@ -108,13 +130,13 @@ function Import-Tree {
     Process {
         $ext = $FileInfo.Extension;
         switch ($ext) {
-            { $_ -eq ("." + [FileFormatEnum]::psd1) } { 
+            { $_ -eq ("." + [FileFormat]::psd1) } { 
                 $tree = Import-PowerShellDataFile -Path:($FileInfo.FullName) -SkipLimitCheck ;
                 break; 
             }
             default { throw "File format '$ext' not supported." }
         }
-        $tree.TA.Path = $FileInfo.FullName;
+        $tree.$TA.Path = $FileInfo.FullName;
         $tree | Write-Output;
     }
 }
@@ -150,16 +172,16 @@ function Get-AttributeLinesPsd1 {
     foreach ($key in $keys) 
     {
         if ($null -eq $attr[$key]) { continue; } 
-        $attrLines.Add("$("`t" * $offset)`t`t'${key}' = $(Get-ValuePsd1 -value:($attr[$key]));"); 
+        $attrLines.Add("$("`t" * $offset)`t'${key}' = $(Get-ValuePsd1 -value:($attr[$key]));"); 
     }
 
     if ($attrLines.Count -eq 0) {
         $outputLines.Add("@{};");
     }
     else {
-        $outputLines.Add("$("`t" * $offset)`t@{");
+        $outputLines.Add("$("`t" * $offset)@{");
         $outputLines.AddRange($attrLines);
-        $outputLines.Add("$("`t" * $offset)`t};");        
+        $outputLines.Add("$("`t" * $offset)};");        
     }
 
     return ,$outputLines;
@@ -176,16 +198,16 @@ function Get-IdxLinesPsd1 {
 
     foreach ($key in $idx) 
     {
-        $idxLines.Add("$("`t" * $offset)`t`t'${key}';"); 
+        $idxLines.Add("$("`t" * $offset)`t'${key}';"); 
     }
 
     if ($idxLines.Count -eq 0) {
         $outputLines.Add("@();");
     }
     else {
-        $outputLines.Add("$("`t" * $offset)`t@(");
+        $outputLines.Add("$("`t" * $offset)@(");
         $outputLines.AddRange($idxLines);
-        $outputLines.Add("$("`t" * $offset)`t);");        
+        $outputLines.Add("$("`t" * $offset));");        
     }
 
     return ,$outputLines;
@@ -200,38 +222,52 @@ function Get-NodeLinesPsd1 {
     $output = New-Object 'System.Collections.Generic.List[string]';
     $output.Add("$("`t" * $offset)@{");
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.SA) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'SA' = " + $lines[0]); }
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$SA) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${SA}' = " + $lines[0]); }
     else { 
-        $output.Add("$("`t" * $offset)'SA' = ");
+        $output.Add("$("`t" * $offset)'${SA}' = ");
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.A) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'A' = " + $lines[0]); }
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$SAM) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${SAM}' = " + $lines[0]); }
     else { 
-        $output.Add("$("`t" * $offset)'A' = ");
+        $output.Add("$("`t" * $offset)'${SAM}' = ");
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-IdxLinesPsd1 -idx:($node.Idx) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'Idx' = " + $lines[0]); }
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$A) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${A}' = " + $lines[0]); }
     else { 
-        $output.Add("$("`t" * $offset)'Idx' = ");
+        $output.Add("$("`t" * $offset)'${A}' = ");
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.IdIdxMap) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'IdIdxMap' = " + $lines[0]); }
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$AM) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${AM}' = " + $lines[0]); }
     else { 
-        $output.Add("$("`t" * $offset)'IdIdxMap' = ");
+        $output.Add("$("`t" * $offset)'${AM}' = ");
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.NameIdMap) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'NameIdMap' = " + $lines[0]); }
+    $lines = (Get-IdxLinesPsd1 -idx:($node.$Idx) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${Idx}' = " + $lines[0]); }
     else { 
-        $output.Add("$("`t" * $offset)'NameIdMap' = ");
+        $output.Add("$("`t" * $offset)'${Idx}' = ");
+        $output.AddRange($lines); 
+    }
+
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$IdIdxMap) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${IdIdxMap}' = " + $lines[0]); }
+    else { 
+        $output.Add("$("`t" * $offset)'${IdIdxMap}' = ");
+        $output.AddRange($lines); 
+    }
+
+    $lines = (Get-AttributeLinesPsd1 -attr:($node.$NameIdMap) -offset:($offset + 1));
+    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${NameIdMap}' = " + $lines[0]); }
+    else { 
+        $output.Add("$("`t" * $offset)'${NameIdMap}' = ");
         $output.AddRange($lines); 
     }
 
@@ -248,10 +284,13 @@ function Get-TreeContentPsd1 {
     $output = New-Object 'System.Collections.Generic.List[string]';
     $output.Add("@{");
 
-    $output.Add("`t'TA' = ");
-    $output.AddRange((Get-AttributeLinesPsd1 -attr:($tree.TA) -offset:1));
+    $output.Add("`t'${TA}' = ");
+    $output.AddRange((Get-AttributeLinesPsd1 -attr:($tree.$TA) -offset:1));
 
-    $keys = $tree.Keys | Where-Object { $_ -ne "TA" } | Sort-Object
+    $output.Add("`t'${TAM}' = ");
+    $output.AddRange((Get-AttributeLinesPsd1 -attr:($tree.$TAM) -offset:1));
+
+    $keys = $tree.Keys | Where-Object { ($_ -ne $TA) -and ($_ -ne $TAM) } | Sort-Object
     foreach ($key in $keys) 
     {
         $output.Add("`t'${key}' =");
@@ -273,12 +312,12 @@ function Export-Tree {
     )
 
     Process {
-        if ( -not $Path) { $Path = $Tree.TA.Path }
+        if ( -not $Path) { $Path = $Tree.$TA.Path }
         if (-not $Path) { throw "Path not specified." }
         $ext = [System.IO.Path]::GetExtension($Path);
 
         switch ($ext) {
-            { $_ -eq ("." + [FileFormatEnum]::psd1) } { 
+            { $_ -eq ("." + [FileFormat]::psd1) } { 
                 $content = Get-TreeContentPsd1 -tree:$Tree;
                 break; 
             }
@@ -295,202 +334,5 @@ Export-ModuleMember -Function:Export-Tree
 Export-ModuleMember -Alias:expt
 #endregion
 
-#region get
-
-function Get-NodeItemCore {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline = $true, ParameterSetName = 'FromSection')] 
-        [ValidateScript({ [ChildType]::Section -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $Section,
-
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromSection')] [Alias("I")] [string] $Include = "*",
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromSection')] [Alias("Ex")] [string] $Exclude = $null
-    )
-
-    Process {
-        $value = $Section.Value;
-
-        $includeKeys = $value.Keys | 
-        Where-Object { $_ -like $Include } | 
-        Where-Object { -not ($_ -like $Exclude) } | 
-        Sort-Object;
-
-        foreach ($itemKey in $includeKeys) {
-            $item = $value[$itemKey];
-            ndni -K:$itemKey -V:$item -Parent:$Section | Write-Output ;    
-        }
-    }
-}
-
-function Get-NodeItem {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline = $true, ParameterSetName = 'FromSection')] 
-        [ValidateScript({ [ChildType]::Section -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $Section,
-
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromSection')] [Alias("I")] [string] $Include = "*",
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromSection')] [Alias("Ex")] [string] $Exclude = $null,
-
-        [Parameter(ParameterSetName = 'FromDN')] 
-        [ValidateScript({ [ChildType]::DN -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $DN,
-
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromDN')] [Alias("IP")] [string] $IncludePath = "*${PathDelimiter}*",
-        [Parameter(Mandatory = $false, ParameterSetName = 'FromDN')] [Alias("ExP")] [string] $ExcludePath = $null
-    )
-
-    Begin {
-        $sections = @();
-        if ($PSCmdlet.ParameterSetName -eq 'FromDN') {
-            $dnIncludePath = ConvertTo-DNPath -Path:$IncludePath;
-            $dnExcludePath = $ExcludePath ? (ConvertTo-DNPath -Path:$ExcludePath) : $null;
-            if ([ChildType]::Item -ne [ChildType]::($dnIncludePath.PathType)) { throw "Incorrect Path Type." }
-            if ($dnExcludePath -and ([ChildType]::Item -ne [ChildType]::($dnExcludePath.PathType))) { throw "Incorrect Path Type." }
-            gdns -DN:$DN -I:($dnIncludePath.SectionPart) -Ex:($dnExcludePath?.SectionPart) | ForEach-Object { $sections += $_; }
-        }
-    }
-
-    Process {
-        if ($PSCmdlet.ParameterSetName -eq 'FromSection') {
-            if ($Section) { $sections += $Section; }
-        }
-    }
-
-    End {
-        $inc = ($PSCmdlet.ParameterSetName -eq 'FromSection') ? $Include : $dnIncludePath.ItemPart;
-        $ex = ($PSCmdlet.ParameterSetName -eq 'FromSection') ? $Include : $dnExcludePath.ItemPart;
-        $sections | Get-DNItemCore -I:$inc -Ex:$ex | Write-Output
-    }
-}
-Set-Alias -Name:gni -Value:Get-NodeItem
-Export-ModuleMember -Function:Get-NodeItem
-Export-ModuleMember -Alias:gni
-
-#endregion
-
-#region set
-function Set-NodeAttribute {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline = $true)] [Alias("S")] 
-        [ValidateScript({ [ChildType]::Section -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $Section,
-
-        [Parameter(Mandatory = $true)] [Alias("T")]         
-        [ValidateScript({ [ChildType]::DN -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $TargetDN,
-
-        [Parameter(Mandatory = $false)] [Alias("NO")] [switch] $NotOverride,
-        [Parameter(Mandatory = $false)] [Alias("NC")] [switch] $NoCopyHashtable
-    )
-
-    Process {
-        $targetPath = ConvertTo-DNPath -Path $Section.Key;
-
-        $root = $TargetDN.Value;
-        if ($NotOverride -and $root.ContainsKey($targetPath.SectionPart)) { throw "Overriding prohibited." }
-        else {
-            $root[$targetPath.SectionPart] = (($NoCopyHashtable) ? $Section.Value : (Copy-HashtableDeep -InputObject:$Section.Value ));
-        }        
-    }
-
-    End {
-        Write-Output $TargetDN;
-    }
-}
-Set-Alias -Name:sna -Value:Set-NodeAttribute
-Export-ModuleMember -Function:Set-NodeAttribute
-Export-ModuleMember -Alias:sna
-
-function Set-Node {
-    [CmdletBinding()]
-    param (
-        [Parameter(ValueFromPipeline = $true)] [Alias("I")] 
-        [ValidateScript({ [ChildType]::Item -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $Item,
-
-        [Parameter(Mandatory = $true)] [Alias("T")]
-        [ValidateScript({ [ChildType]::Section -eq [ChildType]::($_.ChildType) })]
-        [PSCustomObject] $TargetSection,
-
-        [Parameter(Mandatory = $false)] [Alias("NO")] [switch] $NotOverride,
-        [Parameter(Mandatory = $false)] [Alias("NC")] [switch] $NoCopyHashtable
-    )
-
-    Process {
-        $section = $TargetSection.Value;
-
-        if ($NotOverride -and $section.ContainsKey($Item.Key)) { throw "Overriding prohibited." }
-        else {
-            $section[$Item.Key] = (($NoCopyHashtable) ? $Item.Value : (Copy-HashtableDeep -InputObject:$Item.Value ));
-        }
-    }
-
-    End {
-        Write-Output $TargetSection;
-    }
-}
-Set-Alias -Name:sn -Value:Set-Node
-Export-ModuleMember -Function:Set-Node
-Export-ModuleMember -Alias:sn
-
-#endregion
-
-#region remove
-function Remove-Node {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)] 
-        [ValidateScript({ 
-                @([ChildType]::Section, [ChildType]::Item, [ChildType]::Property).Contains([ChildType]::($_.ChildType))
-            })]
-        [PSCustomObject] $ChildItem,
-
-        [Parameter(Mandatory = $true)] 
-        [ValidateScript({ [ChildType]::DN -eq $_.ChildType })]
-        [PSCustomObject] $DN,
-
-        [Parameter(Mandatory = $false)] [switch] $KeepEmpty
-    )
-
-    $root = $DN.Value;
-
-    if ( [ChildType]::($ChildItem.Path.PathType) -eq [ChildType]::Section) {
-        $root.Remove($ChildItem.Path.Key);
-    }
-    elseif ( [ChildType]::($ChildItem.Path.PathType) -eq [ChildType]::Item) {
-        $section = ($root) ? $root[($ChildItem.Path.SectionPart)] : $null
-        if ($section) { 
-            $section.Remove($ChildItem.Path.Key); 
-            if (-not $KeepEmpty) {
-                if ($section.Keys.Count -eq 0) { $root.Remove($ChildItem.Path.SectionPart); }
-            }
-        }
-    }
-    elseif ( [ChildType]::($ChildItem.Path.PathType) -eq [ChildType]::Property) {
-         
-        $section = ($root) ? $root[($ChildItem.Path.SectionPart)] : $null;
-        $item = ($section) ? $section[($ChildItem.Path.ItemPart)] : $null;         
-        if ($item) { 
-            $item.Remove($ChildItem.Path.Key);
-
-            if (-not $KeepEmpty) {
-                if ($item.Keys.Count -eq 0) { $section.Remove($ChildItem.Path.ItemPart); }
-                if ($section.Keys.Count -eq 0) { $root.Remove($ChildItem.Path.SectionPart); }
-            }
-        }
-    }
-    else { throw "Unhandled ChildType." }
-
-    return $DN;
-}
-
-Set-Alias -Name:rmn -Value:Remove-Node
-Export-ModuleMember -Function:Remove-Node
-Export-ModuleMember -Alias:rmn
-
-#endregion
 
 Write-Host "DataNode imported"
