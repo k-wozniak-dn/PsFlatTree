@@ -1,21 +1,16 @@
 #region const
 enum FileFormat {psd1; json; xml; csv; }
-enum TreeSection { TA; TAC }
-enum NodeSection { SA; SAC; A; AC; Idx; IdIdxMap; NameIdMap  }
-enum ValueType { s; i; dbl; b; }
+enum NodeSection { SA; A; }
+enum SysAttrKey {
+    Path; Id; NodeName; NextChildId; Idx
+}
 
 # Path delimiter
-Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly
-
-Set-Variable -Name 'TA' -Value "$([TreeSection]::TA)" -Option ReadOnly
-Set-Variable -Name 'TAC' -Value "$([TreeSection]::TAC)" -Option ReadOnly
-Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly
-Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly
-Set-Variable -Name 'SAC' -Value "$([NodeSection]::SAC)" -Option ReadOnly
-Set-Variable -Name 'AC' -Value "$([NodeSection]::AC)" -Option ReadOnly
-Set-Variable -Name 'Idx' -Value "$([NodeSection]::Idx)" -Option ReadOnly
-Set-Variable -Name 'IdIdxMap' -Value "$([NodeSection]::IdIdxMap)" -Option ReadOnly
-Set-Variable -Name 'NameIdMap' -Value "$([NodeSection]::NameIdMap)" -Option ReadOnly
+Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
+Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
+Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
+$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx);
+Set-Variable -Name 'AllSysAttrKeys' -Value $sysAttr -Option ReadOnly;
 
 #endregion
 
@@ -31,6 +26,99 @@ function Copy-HashtableDeep {
     $deepCopy = [System.Management.Automation.PSSerializer]::Deserialize($serialized)
     return $deepCopy
 }
+#endregion
+
+#region attributes
+function Get-Attribute {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)] [Alias("N")] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+        [switch] $System
+    )
+
+    if ($System) { return $Node.$SA[$Key]; }
+    else { return $Node.$A[$Key]; }
+}
+Set-Alias -Name:ga -Value:Get-Attribute
+Export-ModuleMember -Function:Get-Attribute
+Export-ModuleMember -Alias:ga
+
+function Test-SysAttribute {
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
+        [Parameter(Mandatory = $false)] [Alias("K")] [string] $Key,
+
+        [Parameter(Mandatory = $false)] [Alias("V")]
+        [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
+        [object] $Value,
+
+        [switch] $All 
+    )
+
+    $kvList = @();
+    if ($All) { 
+        $Node.$SA.Keys | 
+        ForEach-Object { [PSCustomObject]@{ Key = $_; Value = $Value ?? (ga -N:$Node -K:$_ -System) } } |
+        ForEach-Object { $kvList += $_ }
+    }
+    elseif ($Key) {
+        $kvList += [PSCustomObject]@{ Key = $Key; Value = $Value ?? (ga -N:$Node -K:$_ -System) }
+    }
+    else {
+        return $true;
+    }
+
+    $kvList | 
+    ForEach-Object { 
+        if (-not $sysAttr.Contains([SysAttrKey]::($_.Key))) {throw "Illegal Sys Key Attribute."} 
+    }
+
+    return $true;
+}
+
+function Set-SysAttribute {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+
+        [Parameter(Mandatory = $true)] [Alias("V")]
+        [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
+        [object] $Value
+    )
+
+    Process {
+        if ($Node -ne $null) {
+            if (Test-SysAttribute -N:$Node -K:$Key -V:$Value) {
+                $Node.$SA[$Key] = $Value;                 
+            }
+            return $Node;             
+        } 
+    }
+}
+
+function Set-Attribute {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+
+        [Parameter(Mandatory = $true)] [Alias("V")]
+        [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
+        [object] $Value
+    )
+
+    Process {
+        if ($Node -ne $null) {
+            $Node.$A[$Key] = $Value;
+            return $Node;             
+        }
+    }
+}
+Set-Alias -Name:sa -Value:Set-Attribute
+Export-ModuleMember -Function:Set-Attribute
+Export-ModuleMember -Alias:sa
 #endregion
 
 #region path
@@ -62,59 +150,25 @@ Export-ModuleMember -Alias:htp
 
 #endregion
 
-#region attributes
-function Set-AttributeConstraint {
-        [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)] [Alias('N')]
-        [hashtable] $Node,
-
-        [Parameter(Mandatory = $true)] [Alias('S')]
-        [ValidateSet({"${SAM}"},{"${AM}"})]
-        [string] $Section,  
-
-        [Parameter(Mandatory = $true)] [Alias('K')]
-        [string] $Key,
-
-        [Parameter(Mandatory = $true)] [Alias('VT')]
-        [ValidateScript({ @([ValueType]::s, [ValueType]::i, [ValueType]::b, [ValueType]::dbl).Contains([ValueType]::$_) })]
-        [string] $ValueType
-
-    )
-
-    
-
-}
-Set-Alias -Name:sac -Value:Set-AttributeConstraint
-Export-ModuleMember -Function:Set-AttributeConstraint
-Export-ModuleMember -Alias:sac
-#endregion
-
 #region new
 function New-Node {
     [CmdletBinding()]
     param (
+        [string] $Id,
+
         [ValidateScript({ -not ($_ -match '^[0-9]') })]
-        [string] $Name
+        [string] $NodeName
     )
 
     $nn = @{ 
-        $SA = @{
-            'Name' = $Name;
-            'NextId' = 1;
-        };
-        $SAC = @{
-            'Name' = "type=s;";
-            'NextId' = "type=i;";
-        };
+        $SA = @{};
         $A = @{};
-        $AC = @{};
-        $Idx = @();
-        $IdIdxMap = @{};
-        $NameIdMap = @{}; 
     }
 
-    return $nn
+    Set-SysAttribute -N:$nn -K:"Id" -V:$Id |
+    Set-SysAttribute -K:"NodeName" -V:$NodeName |
+    Set-SysAttribute -K:"NextChildId" -V:1 |
+    Set-SysAttribute -K:"Idx" -V:0 | Write-Output;
 }
 
 Set-Alias -Name:nn -Value:New-Node
@@ -127,14 +181,9 @@ function New-Tree {
         [string] $Path
     )
 
-    $root = (nn -Name:"Root");
-    $root.$SA.Id = "0";
-    $root.$SAC.Id = "type=s;";
+    $root = (nn -Id:"0" -NodeName:"Root" | Set-SysAttribute -K:"Path" -Value:$Path);
 
     $t = @{ 
-        $TA = @{
-            Path = $Path;
-        };
         '0' = $root;
     }
 
@@ -164,7 +213,7 @@ function Import-Tree {
             }
             default { throw "File format '$ext' not supported." }
         }
-        $tree.$TA.Path = $FileInfo.FullName;
+        Set-SysAttribute -N:($tree.'0') -K:'Path' -V:($FileInfo.FullName);
         $tree | Write-Output;
     }
 }
@@ -215,32 +264,6 @@ function Get-AttributeLinesPsd1 {
     return ,$outputLines;
 }
 
-function Get-IdxLinesPsd1 {
-    param (
-        [Parameter(Mandatory = $false)] [array] $idx,
-        [Parameter(Mandatory = $false)] [int] $offset = 0
-    )
-
-    $outputLines = New-Object 'System.Collections.Generic.List[string]';
-    $idxLines = New-Object 'System.Collections.Generic.List[string]';
-
-    foreach ($key in $idx) 
-    {
-        $idxLines.Add("$("`t" * $offset)`t'${key}';"); 
-    }
-
-    if ($idxLines.Count -eq 0) {
-        $outputLines.Add("@();");
-    }
-    else {
-        $outputLines.Add("$("`t" * $offset)@(");
-        $outputLines.AddRange($idxLines);
-        $outputLines.Add("$("`t" * $offset));");        
-    }
-
-    return ,$outputLines;
-}
-
 function Get-NodeLinesPsd1 {
     param (
         [Parameter(Mandatory = $true)] [hashtable] $node,
@@ -257,45 +280,10 @@ function Get-NodeLinesPsd1 {
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.$SAC) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${SAC}' = " + $lines[0]); }
-    else { 
-        $output.Add("$("`t" * $offset)'${SAC}' = ");
-        $output.AddRange($lines); 
-    }
-
     $lines = (Get-AttributeLinesPsd1 -attr:($node.$A) -offset:($offset + 1));
     if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${A}' = " + $lines[0]); }
     else { 
         $output.Add("$("`t" * $offset)'${A}' = ");
-        $output.AddRange($lines); 
-    }
-
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.$AC) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${AC}' = " + $lines[0]); }
-    else { 
-        $output.Add("$("`t" * $offset)'${AC}' = ");
-        $output.AddRange($lines); 
-    }
-
-    $lines = (Get-IdxLinesPsd1 -idx:($node.$Idx) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${Idx}' = " + $lines[0]); }
-    else { 
-        $output.Add("$("`t" * $offset)'${Idx}' = ");
-        $output.AddRange($lines); 
-    }
-
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.$IdIdxMap) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${IdIdxMap}' = " + $lines[0]); }
-    else { 
-        $output.Add("$("`t" * $offset)'${IdIdxMap}' = ");
-        $output.AddRange($lines); 
-    }
-
-    $lines = (Get-AttributeLinesPsd1 -attr:($node.$NameIdMap) -offset:($offset + 1));
-    if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${NameIdMap}' = " + $lines[0]); }
-    else { 
-        $output.Add("$("`t" * $offset)'${NameIdMap}' = ");
         $output.AddRange($lines); 
     }
 
@@ -312,13 +300,7 @@ function Get-TreeContentPsd1 {
     $output = New-Object 'System.Collections.Generic.List[string]';
     $output.Add("@{");
 
-    $output.Add("`t'${TA}' = ");
-    $output.AddRange((Get-AttributeLinesPsd1 -attr:($tree.$TA) -offset:1));
-
-    $output.Add("`t'${TAC}' = ");
-    $output.AddRange((Get-AttributeLinesPsd1 -attr:($tree.$TAC) -offset:1));
-
-    $keys = $tree.Keys | Where-Object { ($_ -ne $TA) -and ($_ -ne $TAC) } | Sort-Object
+    $keys = $tree.Keys | Sort-Object
     foreach ($key in $keys) 
     {
         $output.Add("`t'${key}' =");
@@ -340,7 +322,7 @@ function Export-Tree {
     )
 
     Process {
-        if ( -not $Path) { $Path = $Tree.$TA.Path }
+        if ( -not $Path) { $Path = (ga -N:($Tree.'0') -K:"Path" -S) }
         if (-not $Path) { throw "Path not specified." }
         $ext = [System.IO.Path]::GetExtension($Path);
 
