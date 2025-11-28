@@ -28,6 +28,71 @@ function Copy-HashtableDeep {
 }
 #endregion
 
+#region path
+function ConvertTo-htPath {
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("P")]
+        [string] $Path,
+
+        [switch] $ByName
+    )
+
+    $parts = $Path -split [regex]::Escape($pdel);
+    $parts | ForEach-Object { if ([string]::Empty -eq $_) { throw "Incorrect path '$path'." }}
+    $byName = $false;
+    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9]+$')) { $byName = $true }; $_ } | Out-Null
+    if ($parts.Count -eq 1) {
+        $id = $parts[0];
+        $parentId = $null;
+    }
+    else {
+        $id = $parts[$parts.Count - 1];
+        $parentId = $parts[$parts.Count - 2];
+    }
+
+    return [PSCustomObject] @{ 
+        Level = ($parts).Count;
+        ByName = $byName; 
+        Parts = $parts;
+        Id = $id;
+        ParentId = $parentId; 
+        FullPath = $Path;
+    }
+}
+Set-Alias -Name:htp -Value:ConvertTo-htPath
+Export-ModuleMember -Function:ConvertTo-htPath
+Export-ModuleMember -Alias:htp
+
+#endregion
+
+#region node
+function New-Node {
+    [CmdletBinding()]
+    param (
+        [string] $Id,
+
+        [ValidateScript({ -not ($_ -match '^[0-9]') })]
+        [string] $NodeName
+    )
+
+    $nn = @{ 
+        $SA = @{};
+        $A = @{};
+    }
+
+    Set-SysAttribute -N:$nn -K:"Id" -V:$Id |
+    Set-SysAttribute -K:"NodeName" -V:$NodeName |
+    Set-SysAttribute -K:"NextChildId" -V:1 |
+    Set-SysAttribute -K:"Idx" -V:0 | Write-Output;
+}
+
+Set-Alias -Name:nn -Value:New-Node
+Export-ModuleMember -Function:New-Node
+Export-ModuleMember -Alias:nn
+
+
+#endregion
+
 #region attributes
 function Get-Attribute {
     [CmdletBinding()]
@@ -110,7 +175,7 @@ function Set-Attribute {
     )
 
     Process {
-        if ($Node -ne $null) {
+        if ($null -ne $Node) {
             $Node.$A[$Key] = $Value;
             return $Node;             
         }
@@ -121,59 +186,31 @@ Export-ModuleMember -Function:Set-Attribute
 Export-ModuleMember -Alias:sa
 #endregion
 
-#region path
-function ConvertTo-htPath {
-    param (
-        [Parameter(Mandatory = $true)] [Alias("P")]
-        [string] $Path,
-
-        [switch] $ByName
-    )
-
-    $parts = $Path -split [regex]::Escape($PathDelimiter);
-    $count = ($parts).Count;
-    if ($count -gt 3) { throw "Incorrect path '$path'." }
-    $parts | ForEach-Object { if ([string]::Empty -eq $_) { throw "Incorrect path '$path'." }}
-
-    return [PSCustomObject] @{ 
-        PathType = ($count -eq 1) ? [ChildType]::Section : (($count -eq 2) ? [ChildType]::Item : [ChildType]::Property); 
-        SectionPart = $parts[0]; 
-        ItemPart = $count -gt 1 ? $parts[1] : $null ;
-        PropertyPart = $count -gt 2 ? $parts[2] : $null ;
-        ParentPath = ($count -eq 1) ? $null : (($count -eq 2) ? $parts[0] : $parts[0] + $PathDelimiter + $parts[1]); 
-        FullPath = $Path;
-    }
-}
-Set-Alias -Name:htp -Value:New-Node
-Export-ModuleMember -Function:ConvertTo-htPath
-Export-ModuleMember -Alias:htp
-
-#endregion
-
-#region new
-function New-Node {
+#region tree
+function Get-Node {
     [CmdletBinding()]
     param (
-        [string] $Id,
+        [Parameter(Mandatory = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $false)] [string] $Path,
+        [switch] $Recurse
+    )
+}
+Set-Alias -Name:gn -Value:Get-Node
+Export-ModuleMember -Function:Get-Node
+Export-ModuleMember -Alias:gn
 
-        [ValidateScript({ -not ($_ -match '^[0-9]') })]
-        [string] $NodeName
+function Add-Node {
+    param (
+        [Parameter(Mandatory = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $false)] [string] $ParentPath
     )
 
-    $nn = @{ 
-        $SA = @{};
-        $A = @{};
-    }
 
-    Set-SysAttribute -N:$nn -K:"Id" -V:$Id |
-    Set-SysAttribute -K:"NodeName" -V:$NodeName |
-    Set-SysAttribute -K:"NextChildId" -V:1 |
-    Set-SysAttribute -K:"Idx" -V:0 | Write-Output;
 }
-
-Set-Alias -Name:nn -Value:New-Node
-Export-ModuleMember -Function:New-Node
-Export-ModuleMember -Alias:nn
+Set-Alias -Name:an -Value:Add-Node
+Export-ModuleMember -Function:Add-Node
+Export-ModuleMember -Alias:an
 
 function New-Tree {
     [CmdletBinding()]
