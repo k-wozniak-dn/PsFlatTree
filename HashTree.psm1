@@ -2,15 +2,15 @@
 enum FileFormat {psd1; json; xml; csv; }
 enum NodeSection { SA; A; }
 enum SysAttrKey {
-    Path; Id; NodeName; NextChildId; Idx
+    Path; Id; NodeName; NextChildId; Idx; ByNamePath
 }
 
 # Path delimiter
 Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
+
 Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
 Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
-$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx);
-Set-Variable -Name 'AllSysAttrKeys' -Value $sysAttr -Option ReadOnly;
+$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx; [SysAttrKey]::ByNamePath);
 
 #endregion
 
@@ -29,25 +29,24 @@ function Copy-HashtableDeep {
 #endregion
 
 #region path
-function ConvertTo-htPath {
+function ConvertTo-HtPath {
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("P")]
-        [string] $Path,
-
-        [switch] $ByName
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [string] $Path
     )
 
     $parts = $Path -split [regex]::Escape($pdel);
     $parts | ForEach-Object { if ([string]::Empty -eq $_) { throw "Incorrect path '$path'." }}
     $byName = $false;
-    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9]+$')) { $byName = $true }; $_ } | Out-Null
+    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9]+$')) { $byName = $true }; }
+
     if ($parts.Count -eq 1) {
         $id = $parts[0];
-        $parentId = $null;
+        $parentPath = $null;
     }
     else {
         $id = $parts[$parts.Count - 1];
-        $parentId = $parts[$parts.Count - 2];
+        $parentPath = ($parts[0..($parts.Count - 2)]) -join $pdel;
     }
 
     return [PSCustomObject] @{ 
@@ -55,7 +54,7 @@ function ConvertTo-htPath {
         ByName = $byName; 
         Parts = $parts;
         Id = $id;
-        ParentId = $parentId; 
+        ParentPath = $parentPath; 
         FullPath = $Path;
     }
 }
@@ -63,6 +62,26 @@ Set-Alias -Name:htp -Value:ConvertTo-htPath
 Export-ModuleMember -Function:ConvertTo-htPath
 Export-ModuleMember -Alias:htp
 
+function Compare-HtPath {
+    param (
+        [Parameter(Mandatory = $true)] [PSCustomObject] $Pattern,
+        [Parameter(Mandatory = $true)] [PSCustomObject] $ToCompare,
+        [switch] $Recurse
+    )
+
+    if ($Recurse) {
+        if ($Pattern.Level -gt $ToCompare.Level) { return $false; }
+    }
+    else {
+        if ($Pattern.Level -ne $ToCompare.Level) { return $false; }
+    }
+
+    $match = $true
+    $idx = @(0..($Pattern.Level - 1))
+    $idx | ForEach-Object { if (($ToCompare.Parts[$_]) -notlike ($Pattern.Parts[$_])) { $match = $false }  }
+    return $match;    
+}
+Export-ModuleMember -Function:Compare-HtPath
 #endregion
 
 #region node
@@ -80,25 +99,23 @@ function New-Node {
         $A = @{};
     }
 
-    Set-SysAttribute -N:$nn -K:"Id" -V:$Id |
+    $nn = Set-SysAttribute -N:$nn -K:"Id" -V:$Id |
     Set-SysAttribute -K:"NodeName" -V:$NodeName |
     Set-SysAttribute -K:"NextChildId" -V:1 |
-    Set-SysAttribute -K:"Idx" -V:0 | Write-Output;
+    Set-SysAttribute -K:"Idx" -V:0 ;
+
+    return $nn;
 }
 
 Set-Alias -Name:nn -Value:New-Node
 Export-ModuleMember -Function:New-Node
 Export-ModuleMember -Alias:nn
 
-
-#endregion
-
-#region attributes
 function Get-Attribute {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)] [Alias("N")] [hashtable] $Node,
-        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [string] $Key,
         [switch] $System
     )
 
@@ -111,10 +128,10 @@ Export-ModuleMember -Alias:ga
 
 function Test-SysAttribute {
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
-        [Parameter(Mandatory = $false)] [Alias("K")] [string] $Key,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $false)] [string] $Key,
 
-        [Parameter(Mandatory = $false)] [Alias("V")]
+        [Parameter(Mandatory = $false)]
         [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
         [object] $Value,
 
@@ -145,40 +162,36 @@ function Test-SysAttribute {
 function Set-SysAttribute {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
-        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [string] $Key,
 
-        [Parameter(Mandatory = $true)] [Alias("V")]
+        [Parameter(Mandatory = $true)]
         [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
         [object] $Value
     )
 
-    Process {
-        if ($Node -ne $null) {
-            if (Test-SysAttribute -N:$Node -K:$Key -V:$Value) {
-                $Node.$SA[$Key] = $Value;                 
-            }
-            return $Node;             
-        } 
+    if ($Node -ne $null) {
+        if (Test-SysAttribute -N:$Node -K:$Key -V:$Value) {
+            $Node.$SA[$Key] = $Value;                 
+        }
+        return $Node;             
     }
 }
 
 function Set-Attribute {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [Alias("N")] [hashtable] $Node,
-        [Parameter(Mandatory = $true)] [Alias("K")] [string] $Key,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $true)] [string] $Key,
 
-        [Parameter(Mandatory = $true)] [Alias("V")]
+        [Parameter(Mandatory = $true)]
         [ValidateScript({ ($_ -is [string]) -or ($_ -is [int]) -or ($_ -is [double]) -or ($_ -is [bool]) })]
         [object] $Value
     )
 
-    Process {
-        if ($null -ne $Node) {
-            $Node.$A[$Key] = $Value;
-            return $Node;             
-        }
+    if ($null -ne $Node) {
+        $Node.$A[$Key] = $Value;
+        return $Node;             
     }
 }
 Set-Alias -Name:sa -Value:Set-Attribute
@@ -190,10 +203,34 @@ Export-ModuleMember -Alias:sa
 function Get-Node {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Tree,
         [Parameter(Mandatory = $false)] [string] $Path,
         [switch] $Recurse
     )
+
+    if (-not $Path) {
+        $Path = "*";
+        $Recurse = $true;
+    }
+
+    $patternHtPath = ConvertTo-HtPath -Path:$Path;
+
+    $Tree.Keys | 
+    ForEach-Object {
+        $node = $Tree[$_];
+        if ($patternHtPath.ByName -eq $false) {
+            $nodeHtPath = ConvertTo-htPath -Path:$_;            
+            $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeHtPath -Recurse:$Recurse);
+        } 
+        elseif ($patternHtPath.ByName -eq $true) {
+            $nodeByNamePath = Get-Attribute -N:$node -K:([SysAttrKey]::ByNamePath) -S;
+            $nodeByNameHtPath = ConvertTo-htPath -Path:$nodeByNamePath;
+            $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeByNameHtPath -Recurse:$Recurse);
+        }
+        
+        if ($match) { Write-Output $node; }
+    }
+
 }
 Set-Alias -Name:gn -Value:Get-Node
 Export-ModuleMember -Function:Get-Node
@@ -218,7 +255,9 @@ function New-Tree {
         [string] $Path
     )
 
-    $root = (nn -Id:"0" -NodeName:"Root" | Set-SysAttribute -K:"Path" -Value:$Path);
+    $root = (nn -Id:"0" -NodeName:"Root" | 
+    Set-SysAttribute -K:"ByNamePath" -Value:"Root" |
+    Set-SysAttribute -K:"Path" -Value:$Path);
 
     $t = @{ 
         '0' = $root;
@@ -241,18 +280,16 @@ function Import-Tree {
         [System.IO.FileInfo] $FileInfo
     )
 
-    Process {
-        $ext = $FileInfo.Extension;
-        switch ($ext) {
+    $ext = $FileInfo.Extension;
+    switch ($ext) {
             { $_ -eq ("." + [FileFormat]::psd1) } { 
                 $tree = Import-PowerShellDataFile -Path:($FileInfo.FullName) -SkipLimitCheck ;
                 break; 
             }
             default { throw "File format '$ext' not supported." }
-        }
-        Set-SysAttribute -N:($tree.'0') -K:'Path' -V:($FileInfo.FullName);
-        $tree | Write-Output;
     }
+    Set-SysAttribute -N:($tree.'0') -K:'Path' -V:($FileInfo.FullName) | Out-Null;
+    return $tree;
 }
 
 Set-Alias -Name:impt -Value:Import-Tree
