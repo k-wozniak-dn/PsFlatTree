@@ -2,7 +2,7 @@
 enum FileFormat {psd1; json; xml; csv; }
 enum NodeSection { SA; A; }
 enum SysAttrKey {
-    Path; Id; NodeName; NextChildId; Idx; ByNamePath
+    Path; Id; NodeName; NextChildId; Idx
 }
 
 # Path delimiter
@@ -10,7 +10,7 @@ Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
 
 Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
 Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
-$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx; [SysAttrKey]::ByNamePath);
+$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx);
 
 #endregion
 
@@ -38,7 +38,7 @@ function ConvertTo-HtPath {
     $parts = $Path -split [regex]::Escape($pdel);
     $parts | ForEach-Object { if ([string]::Empty -eq $_) { throw "Incorrect path '$path'." }}
     $byName = $false;
-    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9]+$')) { $byName = $true }; }
+    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9*]+$')) { $byName = $true }; }
 
     if ($parts.Count -eq 1) {
         $id = $parts[0];
@@ -200,6 +200,32 @@ Export-ModuleMember -Alias:sa
 #endregion
 
 #region tree
+function ConvertTo-ByNameHtPath {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $true)] [object] $Path
+    )
+
+    $htPath = ($Path -is [string] ) ? (ConvertTo-HtPath -Path:$Path) : [PSCustomObject] $Path;
+    if ($htPath.ByName -eq $true) { throw "Path must be id type." }
+
+    $byNamePathArray = @();
+    for ($idx = 0 ; $idx -lt $htPath.Parts.Count ; $idx++) {
+        $subArray = $htPath.Parts[0..$idx];
+        $subPath = $subArray -join $pdel;
+        $node = $Tree[$subPath];
+        if ($null -eq $node) { throw "Node not found" }
+        $name = Get-Attribute -N:$node -K:([SysAttrKey]::NodeName) -S;
+        if (-not $name) { $name = Get-Attribute -N:$node -K:([SysAttrKey]::Id) -S; }
+        $byNamePathArray += $name;
+    }
+
+    return ConvertTo-HtPath -P:($byNamePathArray -join $pdel) ;
+
+}
+Export-ModuleMember -Function:ConvertTo-ByNameHtPath
+
 function Get-Node {
     [CmdletBinding()]
     param (
@@ -217,18 +243,16 @@ function Get-Node {
 
     $Tree.Keys | 
     ForEach-Object {
-        $node = $Tree[$_];
+        $nodeHtPath = ConvertTo-htPath -Path:$_;  
         if ($patternHtPath.ByName -eq $false) {
-            $nodeHtPath = ConvertTo-htPath -Path:$_;            
             $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeHtPath -Recurse:$Recurse);
         } 
         elseif ($patternHtPath.ByName -eq $true) {
-            $nodeByNamePath = Get-Attribute -N:$node -K:([SysAttrKey]::ByNamePath) -S;
-            $nodeByNameHtPath = ConvertTo-htPath -Path:$nodeByNamePath;
+            $nodeByNameHtPath = ConvertTo-ByNameHtPath -T:$Tree -Path:$nodeHtPath;
             $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeByNameHtPath -Recurse:$Recurse);
         }
         
-        if ($match) { Write-Output $node; }
+        if ($match) { Write-Output ($Tree[$_]); }
     }
 
 }
@@ -256,7 +280,6 @@ function New-Tree {
     )
 
     $root = (nn -Id:"0" -NodeName:"Root" | 
-    Set-SysAttribute -K:"ByNamePath" -Value:"Root" |
     Set-SysAttribute -K:"Path" -Value:$Path);
 
     $t = @{ 
