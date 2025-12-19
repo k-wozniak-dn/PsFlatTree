@@ -285,6 +285,14 @@ function Add-Node {
         if ($parents.Count -gt 1) { throw "Multiple parent not allowed." }
 
         $parent = $parents | Select-Object -First 1;
+
+        $copyName = Get-Attribute -N:$copy -K:([SysAttrKey]::NodeName) -S;
+        $allChilds = Get-Node -Tree:$Tree -Path:("${ParentPath}${pdel}*");
+        $allChilds | ForEach-Object { 
+            $childName = Get-Attribute -N:$_ -K:([SysAttrKey]::NodeName) -S;
+            if ($copyName -eq $childName) { throw "Child with the same name already exists." }
+        }
+
         $nextId = Get-Attribute -N:$parent -K:([SysAttrKey]::NextChildId) -S;
 
         $newPath = "${ParentPath}${pdel}${nextId}";        
@@ -300,6 +308,43 @@ function Add-Node {
 Set-Alias -Name:an -Value:Add-Node
 Export-ModuleMember -Function:Add-Node
 Export-ModuleMember -Alias:an
+
+function Remove-Node {
+    param (
+        [Parameter(Mandatory = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true)] [hashtable] $Node,
+        [Parameter(Mandatory = $false)] [string] $Path
+    )
+
+    Begin {
+        [string[]] $keys = @(); 
+        if ($Path) {
+            $allChilds = Get-Node -Tree:$Tree -Path:$Path -Recurse;
+            $allChilds | ForEach-Object { 
+                $childPath = Get-Attribute -Node:$_ -Key:([SysAttrKey]::Path) -S;
+                $keys += $childPath;
+            }
+        }
+    }
+
+    Process {
+        if ($Node) 
+        {
+            $nodePath = Get-Attribute -Node:$Node -Key:([SysAttrKey]::Path) -S;
+            $allChilds = Get-Node -Tree:$Tree -Path:$nodePath -Recurse;
+            $allChilds | ForEach-Object { 
+                $childPath = Get-Attribute -Node:$_ -Key:([SysAttrKey]::Path) -S;
+                $keys += $childPath;
+            }            
+        }
+    }
+    End {
+        $keys | Sort-Object -Descending | ForEach-Object { $Tree.Remove($_); }
+    }
+}
+Set-Alias -Name:rmn -Value:Remove-Node
+Export-ModuleMember -Function:Remove-Node
+Export-ModuleMember -Alias:rmn
 
 function New-Tree {
     [CmdletBinding()]
