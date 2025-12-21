@@ -29,59 +29,133 @@ function Copy-HashtableDeep {
 #endregion
 
 #region path
+
+<#
+    .SYNOPSIS
+    Converts string path into PsCustomObject containing detailed info about path.
+
+    .PARAMETER Path
+    Path in the string format.
+
+    .EXAMPLE
+    PS> cvhtp -P:"0:section_A:node_X"
+
+    Level       : 3
+    Descriptive : True
+    Parts       : {0, section_A, node_X}
+    Id          : node_X
+    ParentPath  : 0:section_A
+    FullPath    : 0:section_A:node_X
+
+    .EXAMPLE
+    PS> "0:4:9" | cvhtp 
+
+    Level       : 3
+    Descriptive : False
+    Parts       : {0, 4, 9}
+    Id          : 9
+    ParentPath  : 0:4
+    FullPath    : 0:4:9
+
+#>
 function ConvertTo-HtPath {
+    [CmdletBinding(DefaultParameterSetName="Default")]
+    [OutputType([PSCustomObject], ParameterSetName="Default")]
+
     param (
         [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
         [string] $Path
     )
 
-    $parts = $Path -split [regex]::Escape($pdel);
-    $parts | ForEach-Object { if ([string]::Empty -eq $_) { throw "Incorrect path '$path'." }}
-    $byName = $false;
-    $parts | ForEach-Object { if ( -not ($_ -match '^[0-9*]+$')) { $byName = $true }; }
+    [string[]] $parts = $Path -split [regex]::Escape($pdel);
+    [bool] $descriptive = $false;
+    foreach ($part in $parts) {
+        if ([string]::Empty -eq $part) { throw "Incorrect path '$path'." };
+        # if path contains any non-numeric element, it's marked as descriptive
+        if ( $part -notmatch '^[0-9*]+$' ) { $descriptive = $true };        
+    }
 
-    if ($parts.Count -eq 1) {
-        $id = $parts[0];
-        $parentPath = $null;
-    }
-    else {
-        $id = $parts[$parts.Count - 1];
-        $parentPath = ($parts[0..($parts.Count - 2)]) -join $pdel;
-    }
+    # id is the last element in path
+    [string] $id = ($parts.Count -eq 1) ? $parts[0] : $parts[$parts.Count - 1];
+    # parent path for root path is null
+    [string] $parentPath = ($parts.Count -eq 1) ? $null : ($parts[0..($parts.Count - 2)]) -join $pdel;
 
     return [PSCustomObject] @{ 
         Level = ($parts).Count;
-        ByName = $byName; 
+        Descriptive = $descriptive; 
         Parts = $parts;
         Id = $id;
         ParentPath = $parentPath; 
         FullPath = $Path;
     }
 }
-Set-Alias -Name:htp -Value:ConvertTo-htPath
+Set-Alias -Name:cvhtp -Value:ConvertTo-htPath
 Export-ModuleMember -Function:ConvertTo-htPath
-Export-ModuleMember -Alias:htp
+Export-ModuleMember -Alias:cvhtp
 
+<#
+    .SYNOPSIS
+    Compares path to test with pattern path. 
+
+    .PARAMETER Pattern
+    Path in the PsCutomObject format.
+
+    .PARAMETER Tested
+    Path in the PsCutomObject format.
+
+    .PARAMETER Recurse
+    Switch if used in recurse scenario.
+
+    .EXAMPLE
+    wildcard non-recurse
+    PS> $tp = ( "0:4:9" | cvhtp )
+    PS> $pp = ( "0:4:*" | cvhtp )
+    PS> crhtp -P:$pp -T:$tp 
+    True
+
+    .EXAMPLE
+    wildcard non-recurse
+    PS> $tp = ( "0:4:9" | cvhtp )
+    PS> $pp = ( "0:*" | cvhtp )
+    PS> crhtp -P:$pp -T:$tp 
+    False
+
+    .EXAMPLE
+    wildcard recurse
+    PS> $tp = ( "0:4:9" | cvhtp )
+    PS> $pp = ( "0:*" | cvhtp )
+    PS> crhtp -P:$pp -T:$tp -R
+    True
+
+#>
 function Compare-HtPath {
     param (
         [Parameter(Mandatory = $true)] [PSCustomObject] $Pattern,
-        [Parameter(Mandatory = $true)] [PSCustomObject] $ToCompare,
+        [Parameter(Mandatory = $true)] [PSCustomObject] $Tested,
         [switch] $Recurse
     )
 
+    if ($null -eq $Tested.Level -or $null -eq $Pattern.Level) { throw "HtPath object(s) must have Level property set." }
+
     if ($Recurse) {
-        if ($Pattern.Level -gt $ToCompare.Level) { return $false; }
+        # if Recurse, pattern can be shorter or equal length as tested path.
+        if ($Pattern.Level -gt $Tested.Level) { return $false; }
     }
     else {
-        if ($Pattern.Level -ne $ToCompare.Level) { return $false; }
+        # if non-recurse, pattern must be exactly as long as tested path.
+        if ($Pattern.Level -ne $Tested.Level) { return $false; }
     }
 
-    $match = $true
-    $idx = @(0..($Pattern.Level - 1))
-    $idx | ForEach-Object { if (($ToCompare.Parts[$_]) -notlike ($Pattern.Parts[$_])) { $match = $false }  }
-    return $match;    
+    For ([int] $idx = 0; $idx -lt $Pattern.Level; $idx++) {
+        if (($Tested.Parts[$idx]) -notlike ($Pattern.Parts[$idx])) { return $false }
+    }
+
+    return $true;    
 }
+Set-Alias -Name:crhtp -Value:Compare-htPath
 Export-ModuleMember -Function:Compare-HtPath
+Export-ModuleMember -Alias:crhtp
+
 #endregion
 
 #region node
@@ -208,7 +282,7 @@ function ConvertTo-ByNameHtPath {
     )
 
     $htPath = ($Path -is [string] ) ? (ConvertTo-HtPath -Path:$Path) : [PSCustomObject] $Path;
-    if ($htPath.ByName -eq $true) { throw "Path must be id type." }
+    if ($htPath.Descriptive -eq $true) { throw "Path must be id type." }
 
     $byNamePathArray = @();
     for ($idx = 0 ; $idx -lt $htPath.Parts.Count ; $idx++) {
@@ -245,10 +319,10 @@ function Get-Node {
     $Tree.Keys | 
     ForEach-Object {
         $nodeHtPath = ConvertTo-htPath -Path:$_;  
-        if ($patternHtPath.ByName -eq $false) {
+        if ($patternHtPath.Descriptive -eq $false) {
             $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeHtPath -Recurse:$Recurse);
         } 
-        elseif ($patternHtPath.ByName -eq $true) {
+        elseif ($patternHtPath.Descriptive -eq $true) {
             $nodeByNameHtPath = ConvertTo-ByNameHtPath -T:$Tree -Path:$nodeHtPath;
             $match = (Compare-HtPath -Pattern:$patternHtPath -ToCompare:$nodeByNameHtPath -Recurse:$Recurse);
         }
