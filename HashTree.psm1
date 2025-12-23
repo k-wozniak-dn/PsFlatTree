@@ -163,6 +163,34 @@ Export-ModuleMember -Alias:crhtp
 
 #region node
 
+<#
+    .SYNOPSIS
+    Get one or all attributes or system attributes from node. Outputs collection of PSCstomObjects with properties:
+    Key, Value, System
+
+    .PARAMETER Node
+    Source node.
+
+    .PARAMETER Key
+    Attribute key.
+
+    .PARAMETER System
+    Switch, if used, system attributes are searched for a key.
+
+    .PARAMETER All
+    Switch, if used collection of all attributes is returned.
+
+    .EXAMPLE
+    PS> $node =  nn -NodeName "child-A"
+    PS> $node | ga -All -System
+
+    Key         Value   System
+    ---         -----   ------
+    NodeName    child-A True
+    Idx         0       True
+    NextChildId 1       True
+
+#>
 function Get-Attribute {
     [CmdletBinding(DefaultParameterSetName="Single")]
     [OutputType([PsCustomObject], ParameterSetName="Single")]
@@ -217,6 +245,27 @@ Set-Alias -Name:ga -Value:Get-Attribute
 Export-ModuleMember -Function:Get-Attribute
 Export-ModuleMember -Alias:ga
 
+<#
+    .SYNOPSIS
+    Get attribute value.
+
+    .PARAMETER Node
+    Source node.
+
+    .PARAMETER Key
+    Attribute key.
+
+    .PARAMETER System
+    Switch, if used, system attributes are searched for a key.
+
+    .EXAMPLE
+    PS> $node =  nn -NodeName "child-A"
+    PS> Set-AttributeValue -Node:$node -Key:"Normal" -Value:"I'm attr."
+    PS> gav -N:$node -K:"Normal"
+
+    I'm attr.
+
+#>
 function Get-AttributeValue {
     [CmdletBinding(DefaultParameterSetName="Default")]
     [OutputType([System.Object], ParameterSetName="Default")]
@@ -253,15 +302,16 @@ function Test-Attribute {
                 ($AttributeInfo.Value -is [double]) -or 
                 ($AttributeInfo.Value -is [bool]))) { throw "System Attribute value type not allowed." }
 
-        if (-not $AttributeInfo.System) { 
-            $AttributeInfo | Write-Output; 
-            continue; 
+        if ($AttributeInfo.System) 
+        { 
+            if (-not $sysAttr.Contains([SysAttrKey]::($AttributeInfo.Key))) { throw "System Attribute Key not allowed." } 
+
+            if ([SysAttrKey]::NodeName -eq [SysAttrKey]::($AttributeInfo.Key)) {
+                if ($AttributeInfo.Value -match '^[0-9]') { throw "Incorrect NodeName value." }
+            }
         }
+        else {
 
-        if (-not $sysAttr.Contains([SysAttrKey]::($AttributeInfo.Key))) { throw "System Attribute Key not allowed." } 
-
-        if ([SysAttrKey]::NodeName -eq [SysAttrKey]::($AttributeInfo.Key)) {
-            if ($AttributeInfo.Value -match '^[0-9]') { throw "Incorrect NodeName value." }
         }
 
         $AttributeInfo | Write-Output;
