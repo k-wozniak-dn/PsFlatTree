@@ -478,6 +478,95 @@ Export-ModuleMember -Alias:sav
 
 <#
     .SYNOPSIS
+    Removes attribute(s) from node. Attribute to remove can be passed as AttributeInfo objects in pipe or by Key.
+    System attributes can't be removed.
+
+    .PARAMETER Node
+
+    .PARAMETER AttributeInfo
+
+    .PARAMETER Key
+
+    .PARAMETER PassThru
+    Pass removed AttributeInfo object(s) to output stream.
+
+    .EXAMPLE
+    PS> $node = nn -NodeName "child-A";
+    PS> na -K:"Price" -V:999.99 | sa -Node:$node;
+    PS> #   remove all attributes from node with PassThru
+    PS> ga -N:$node -A | ra -N:$node -P
+
+    Key         Value   System
+    ---         -----   ------
+    Price       999,99  False
+
+    .EXAMPLE
+    PS> $node = nn -NodeName "child-A";
+    PS> na -K:"Price" -V:999.99 | sa -Node:$node;
+    PS> #   remove selected attribute from node with PassThru
+    PS>  ra -N:$node -K:"Price" -P
+
+    Key         Value   System
+    ---         -----   ------
+    Price       999,99  False
+
+#>
+function Remove-Attribute {
+    [CmdletBinding(DefaultParameterSetName="Pipe")]
+    [OutputType([PSCustomObject], ParameterSetName="Pipe")]
+    [OutputType([PSCustomObject], ParameterSetName="Key")]
+
+    param (
+        [Parameter(ParameterSetName = 'Pipe')]
+        [Parameter(ParameterSetName = 'Key')]
+        [Parameter(Mandatory = $true)] [hashtable] $Node,
+
+        [Parameter(ParameterSetName = 'Pipe')]
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true)] [PSCustomObject] $AttributeInfo,
+
+        [Parameter(ParameterSetName = 'Key')]
+        [Parameter(Mandatory = $false)] [string] $Key,
+
+        [Parameter(ParameterSetName = 'Pipe')]
+        [Parameter(ParameterSetName = 'Key')]
+        [switch] $PassThru
+    )
+
+    Begin {
+        [PSCustomObject[]] $toRemove = @();
+
+        if ($Key) {
+            $toRemove += (Get-Attribute -Node:$Node -Key:$Key);
+        }
+    }
+
+    Process
+    { 
+        if ($AttributeInfo) {
+            $toRemove += $AttributeInfo;            
+        }
+    }
+
+    End {
+        foreach ($ai in $toRemove) {
+            if ($ai.System) {
+                Write-Error "Removing system attributes not allowed.";
+                # $Node.$SA.Remove($AttributeInfo.Key); 
+            }
+            else {
+                $Node.$A.Remove($ai.Key); 
+            }
+
+            if ($PassThru) { $ai | Write-Output; }            
+        }
+    }
+}
+Set-Alias -Name:ra -Value:Remove-Attribute
+Export-ModuleMember -Function:Remove-Attribute
+Export-ModuleMember -Alias:ra
+
+<#
+    .SYNOPSIS
     Creates new node and sets initial system attributes.
 
     .PARAMETER NodeName
@@ -515,7 +604,6 @@ function New-Node {
 Set-Alias -Name:nn -Value:New-Node
 Export-ModuleMember -Function:New-Node
 Export-ModuleMember -Alias:nn
-
 
 #endregion
 
