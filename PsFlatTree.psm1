@@ -621,7 +621,7 @@ Export-ModuleMember -Alias:nnode
     Could be either string or converted to FtPath (PSCustomObject).
 
     .EXAMPLE
-    PS> $tree = gci .\kw.psd1 | ipt     # importing tree
+    PS> $tree = gci .\test.psd1 | ipt     # importing tree
     PS> cvdftp -T:$t -P:"0"             # converting numeric root path to descriptive
 
     Level       : 1
@@ -689,7 +689,7 @@ Export-ModuleMember -Alias:cvdftp
     Switch, if used, result contains all descendants of selected node(s).
 
     .EXAMPLE
-    PS> $t = gci .\kw.psd1 | ipt        # importing tree
+    PS> $t = gci .\test.psd1 | ipt        # importing tree
     PS> gnode -T:$t -P:"Root:child-a:*"    # get all direct children of "Root:child-a" node using descriptive pattern
 
     Name                           Value
@@ -706,7 +706,7 @@ Export-ModuleMember -Alias:cvdftp
     3
 
     .EXAMPLE
-    PS> $t = gci .\kw.psd1 | ipt        # importing tree
+    PS> $t = gci .\test.psd1 | ipt        # importing tree
     PS> gnode -T:$t -P:"Root:child-a" -Recurse    # get "Root:child-a" node with all descendants using -Recurse switch
 
     Name                           Value
@@ -778,7 +778,7 @@ Export-ModuleMember -Alias:gnode
     Sends added node object to output stream.
 
     .EXAMPLE
-    PS> $t = gci .\kw.psd1 | ipt        #   tree import
+    PS> $t = gci .\test.psd1 | ipt        #   tree import
     PS> $n = nnode -NodeName "child-B-1"   # new node creation
     PS> $n | anode -T:$t -Parent:"Root:child-b" -Pass      #   adding node
 
@@ -863,7 +863,7 @@ Export-ModuleMember -Alias:anode
     Pass removed node object(s) to output stream.
 
     .EXAMPLE
-    PS> $t = gci .\kw.psd1 | ipt   #   import tree
+    PS> $t = gci .\test.psd1 | ipt   #   import tree
     PS> rnode -T:$t -Path:"0:1" -Pass ;   #   remove node "0:1" (with descendants) and PassThru
 
     Name                           Value
@@ -965,7 +965,7 @@ Export-ModuleMember -Alias:ntree
     Object returned by Get-ChildItem, Get-Item from FileProvider
 
     .EXAMPLE
-    PS> $tree = gi .\kw.psd1 | iptree ;
+    PS> $tree = gi .\test.psd1 | iptree ;
 
 
 #>
