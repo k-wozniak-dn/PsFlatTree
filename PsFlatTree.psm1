@@ -181,8 +181,8 @@ Export-ModuleMember -Alias:crftp
     Switch, if used collection of all attributes is returned.
 
     .EXAMPLE
-    PS> $node =  nn -NodeName "child-A"
-    PS> $node | ga -All -System
+    PS> $node =  nnode -NodeName "child-A"
+    PS> $node | gattr -All -System
 
     Key         Value   System
     ---         -----   ------
@@ -241,9 +241,9 @@ function Get-Attribute {
         } 
     }
 }
-Set-Alias -Name:ga -Value:Get-Attribute
+Set-Alias -Name:gattr -Value:Get-Attribute
 Export-ModuleMember -Function:Get-Attribute
-Export-ModuleMember -Alias:ga
+Export-ModuleMember -Alias:gattr
 
 <#
     .SYNOPSIS
@@ -259,9 +259,9 @@ Export-ModuleMember -Alias:ga
     Switch, if used, system attributes are searched for a key.
 
     .EXAMPLE
-    PS> $node =  nn -NodeName "child-A"
+    PS> $node =  nnode -NodeName "child-A"
     PS> Set-AttributeValue -Node:$node -Key:"Normal" -Value:"I'm attr."
-    PS> gav -N:$node -K:"Normal"
+    PS> gattrv -N:$node -K:"Normal"
 
     I'm attr.
 
@@ -281,9 +281,9 @@ function Get-AttributeValue {
     [PSCustomObject] $attr = $System ? (Get-Attribute -Node:$Node -Key:$Key -System) : (Get-Attribute -Node:$Node -Key:$Key);
     if ($attr) { return $attr.Value; }
 }
-Set-Alias -Name:gav -Value:Get-AttributeValue
+Set-Alias -Name:gattrv -Value:Get-AttributeValue
 Export-ModuleMember -Function:Get-AttributeValue
-Export-ModuleMember -Alias:gav
+Export-ModuleMember -Alias:gattrv
 
 <#
     .SYNOPSIS
@@ -296,8 +296,8 @@ Export-ModuleMember -Alias:gav
     [PSCustomObject] with Key, Value, System.
 
     .EXAMPLE
-    PS> $node =  nn -NodeName "child-A"
-    PS> ga -N:$node -A -S | Test-Attribute
+    PS> $node =  nnode -NodeName "child-A"
+    PS> gattr -N:$node -A -S | Test-Attribute
 
     Key         Value   System
     ---         -----   ------
@@ -339,9 +339,9 @@ function Test-Attribute {
         $AttributeInfo | Write-Output;
     }
 }
-Set-Alias -Name:ta -Value:Test-Attribute
+Set-Alias -Name:tattr -Value:Test-Attribute
 Export-ModuleMember -Function:Test-Attribute
-Export-ModuleMember -Alias:ta
+Export-ModuleMember -Alias:tattr
 
 <#
     .SYNOPSIS
@@ -355,7 +355,7 @@ Export-ModuleMember -Alias:ta
     Switch on for system attributes.
 
     .EXAMPLE
-    PS> na -K:"Price" -V:999.99 | Test-Attribute
+    PS> nattr -K:"Price" -V:999.99 | Test-Attribute
 
     Key         Value   System
     ---         -----   ------
@@ -377,9 +377,9 @@ function New-Attribute {
 
     return [PSCustomObject]@{ Key = $Key; Value = $Value; System = $System } ; 
 }
-Set-Alias -Name:na -Value:New-Attribute
+Set-Alias -Name:nattr -Value:New-Attribute
 Export-ModuleMember -Function:New-Attribute
-Export-ModuleMember -Alias:na
+Export-ModuleMember -Alias:nattr
 
 <#
     .SYNOPSIS
@@ -393,8 +393,8 @@ Export-ModuleMember -Alias:na
     Sends AttributeInfo object to output stream.
 
     .EXAMPLE
-    PS> $node = nn -NodeName "child-A";
-    PS> na -K:"Price" -V:999.99 | sa -Node:$node -PassThru
+    PS> $node = nnode -NodeName "child-A";
+    PS> nattr -K:"Price" -V:999.99 | sattr -Node:$node -PassThru
 
     Key         Value   System
     ---         -----   ------
@@ -425,9 +425,9 @@ function Set-Attribute {
         if ($PassThru) { $AttributeInfo | Write-Output; }
     }
 }
-Set-Alias -Name:sa -Value:Set-Attribute
+Set-Alias -Name:sattr -Value:Set-Attribute
 Export-ModuleMember -Function:Set-Attribute
-Export-ModuleMember -Alias:sa
+Export-ModuleMember -Alias:sattr
 
 <#
     .SYNOPSIS
@@ -445,8 +445,8 @@ Export-ModuleMember -Alias:sa
     Sends AttributeInfo object to output stream.
 
     .EXAMPLE
-    PS> $node = nn -NodeName "child-A";
-    PS> sav -N:$node -K:"Price" -V:999.99 -PassThru
+    PS> $node = nnode -NodeName "child-A";
+    PS> sattrv -N:$node -K:"Price" -V:999.99 -PassThru
 
     Key         Value   System
     ---         -----   ------
@@ -473,9 +473,9 @@ function Set-AttributeValue {
     Test-Attribute -Node:$Node |
     Set-Attribute -Node:$Node -PassThru:$PassThru;
 }
-Set-Alias -Name:sav -Value:Set-AttributeValue
+Set-Alias -Name:sattrv -Value:Set-AttributeValue
 Export-ModuleMember -Function:Set-AttributeValue
-Export-ModuleMember -Alias:sav
+Export-ModuleMember -Alias:sattrv
 
 <#
     .SYNOPSIS
@@ -492,20 +492,20 @@ Export-ModuleMember -Alias:sav
     Pass removed AttributeInfo object(s) to output stream.
 
     .EXAMPLE
-    PS> $node = nn -NodeName "child-A";
-    PS> na -K:"Price" -V:999.99 | sa -Node:$node;
+    PS> $node = nnode -NodeName "child-A";
+    PS> nattr -K:"Price" -V:999.99 | sattr -Node:$node;
     PS> #   remove all attributes from node with PassThru
-    PS> ga -N:$node -A | ra -N:$node -P
+    PS> gattr -N:$node -A | rattr -N:$node -P
 
     Key         Value   System
     ---         -----   ------
     Price       999,99  False
 
     .EXAMPLE
-    PS> $node = nn -NodeName "child-A";
-    PS> na -K:"Price" -V:999.99 | sa -Node:$node;
+    PS> $node = nnode -NodeName "child-A";
+    PS> nattr -K:"Price" -V:999.99 | sattr -Node:$node;
     PS> #   remove selected attribute from node with PassThru
-    PS>  ra -N:$node -K:"Price" -P
+    PS>  rattr -N:$node -K:"Price" -P
 
     Key         Value   System
     ---         -----   ------
@@ -562,9 +562,9 @@ function Remove-Attribute {
         }
     }
 }
-Set-Alias -Name:ra -Value:Remove-Attribute
+Set-Alias -Name:rattr -Value:Remove-Attribute
 Export-ModuleMember -Function:Remove-Attribute
-Export-ModuleMember -Alias:ra
+Export-ModuleMember -Alias:rattr
 
 <#
     .SYNOPSIS
@@ -573,8 +573,8 @@ Export-ModuleMember -Alias:ra
     .PARAMETER NodeName
 
     .EXAMPLE
-    PS> $node = nn -NodeName "child-A";
-    PS> ga -N:$node -A -S
+    PS> $node = nnode -NodeName "child-A";
+    PS> gattr -N:$node -A -S
 
     Key         Value   System
     ---         -----   ------
@@ -602,9 +602,9 @@ function New-Node {
 
     return $nn;
 }
-Set-Alias -Name:nn -Value:New-Node
+Set-Alias -Name:nnode -Value:New-Node
 Export-ModuleMember -Function:New-Node
-Export-ModuleMember -Alias:nn
+Export-ModuleMember -Alias:nnode
 
 #endregion
 
@@ -690,7 +690,7 @@ Export-ModuleMember -Alias:cvdftp
 
     .EXAMPLE
     PS> $t = gci .\kw.psd1 | ipt        # importing tree
-    PS> gn -T:$t -P:"Root:child-a:*"    # get all direct children of "Root:child-a" node using descriptive pattern
+    PS> gnode -T:$t -P:"Root:child-a:*"    # get all direct children of "Root:child-a" node using descriptive pattern
 
     Name                           Value
     ----                           -----
@@ -701,13 +701,13 @@ Export-ModuleMember -Alias:cvdftp
     A                              {}
     SA                             {[Path, 0:1:3], [Id, 3], [NextChildId, 1], [Idx, 0]}
 
-    PS> (gn -T:$t -P:"Root:child-a:*").Count    # checks number of nodes in result collection
+    PS> (gnode -T:$t -P:"Root:child-a:*").Count    # checks number of nodes in result collection
 
     3
 
     .EXAMPLE
     PS> $t = gci .\kw.psd1 | ipt        # importing tree
-    PS> gn -T:$t -P:"Root:child-a" -Recurse    # get "Root:child-a" node with all descendants using -Recurse switch
+    PS> gnode -T:$t -P:"Root:child-a" -Recurse    # get "Root:child-a" node with all descendants using -Recurse switch
 
     Name                           Value
     ----                           -----
@@ -757,9 +757,9 @@ function Get-Node {
 
     $nodes | Write-Output;
 }
-Set-Alias -Name:gn -Value:Get-Node
+Set-Alias -Name:gnode -Value:Get-Node
 Export-ModuleMember -Function:Get-Node
-Export-ModuleMember -Alias:gn
+Export-ModuleMember -Alias:gnode
 
 <#
     .SYNOPSIS
@@ -779,15 +779,15 @@ Export-ModuleMember -Alias:gn
 
     .EXAMPLE
     PS> $t = gci .\kw.psd1 | ipt        #   tree import
-    PS> $n = nn -NodeName "child-B-1"   # new node creation
-    PS> $n | an -T:$t -Parent:"Root:child-b" -Pass      #   adding node
+    PS> $n = nnode -NodeName "child-B-1"   # new node creation
+    PS> $n | anode -T:$t -Parent:"Root:child-b" -Pass      #   adding node
 
     Name                           Value
     ----                           -----
     A                              {}
     SA                             {[Path, 0:2:1], [Id, 1], [NodeName, child-B-1], [NextChildId, 1]…}
 
-    PS> gn -T:$t -P:"Root:child-b" -Recurse     #   getting nodes to check new node was added
+    PS> gnode -T:$t -P:"Root:child-b" -Recurse     #   getting nodes to check new node was added
 
     Name                           Value
     ----                           -----
@@ -843,9 +843,9 @@ function Add-Node {
         if ($PassThru) { $copy | Write-Output; }
     }
 }
-Set-Alias -Name:an -Value:Add-Node
+Set-Alias -Name:anode -Value:Add-Node
 Export-ModuleMember -Function:Add-Node
-Export-ModuleMember -Alias:an
+Export-ModuleMember -Alias:anode
 
 <#
     .SYNOPSIS
@@ -864,7 +864,7 @@ Export-ModuleMember -Alias:an
 
     .EXAMPLE
     PS> $t = gci .\kw.psd1 | ipt   #   import tree
-    PS> rn -T:$t -Path:"0:1" -Pass ;   #   remove node "0:1" (with descendants) and PassThru
+    PS> rnode -T:$t -Path:"0:1" -Pass ;   #   remove node "0:1" (with descendants) and PassThru
 
     Name                           Value
     ----                           -----
@@ -934,9 +934,9 @@ function Remove-Node {
         }
     }
 }
-Set-Alias -Name:rn -Value:Remove-Node
+Set-Alias -Name:rnode -Value:Remove-Node
 Export-ModuleMember -Function:Remove-Node
-Export-ModuleMember -Alias:rn
+Export-ModuleMember -Alias:rnode
 
 function New-Tree {
     [CmdletBinding()]
@@ -948,9 +948,9 @@ function New-Tree {
     return $tree
 }
 
-Set-Alias -Name:nt -Value:New-Tree
+Set-Alias -Name:ntree -Value:New-Tree
 Export-ModuleMember -Function:New-Tree
-Export-ModuleMember -Alias:nt
+Export-ModuleMember -Alias:ntree
 
 #endregion
 
