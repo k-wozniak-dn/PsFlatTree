@@ -4,6 +4,9 @@ enum NodeSection { SA; A; }
 enum SysAttrKey {
     Path; Id; NodeName; NextChildId; Idx
 }
+enum Position {
+    Unchanged; First; Last
+}
 
 # Path delimiter
 Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
@@ -598,7 +601,8 @@ function New-Node {
 
     if ($NodeName) { Set-AttributeValue -Node:$nn -Key:([SysAttrKey]::NodeName) -Value:$NodeName -System ;}
     Set-AttributeValue -Node:$nn -Key:([SysAttrKey]::NextChildId) -Value:1 -System ;
-    Set-AttributeValue -Node:$nn -Key:([SysAttrKey]::Idx) -Value:0 -System ;
+    #   new node is not indexed until it's added to the tree
+    Set-AttributeValue -Node:$nn -Key:([SysAttrKey]::Idx) -Value:-1 -System ;
 
     return $nn;
 }
@@ -761,6 +765,47 @@ Set-Alias -Name:gnode -Value:Get-Node
 Export-ModuleMember -Function:Get-Node
 Export-ModuleMember -Alias:gnode
 
+function Set-NodeIndex {
+    param (
+        [Parameter(Mandatory = $true)] [hashtable] $Tree,
+        [Parameter(Mandatory = $true)] [string] $Path,
+        [Parameter(Mandatory = $false)] [Position] $Position = [Position]::Unchanged,
+        [Parameter(Mandatory = $false)] [int] $Move = 0,
+        [switch] $PassThru
+    )
+
+    $indexedList = New-Object 'System.Collections.Generic.List[string]';
+
+    [hashtable] $nodeToSet = Get-Node -Tree:$Tree -PatternPath:$Path;
+    if (-not $nodeToSet) { throw "Node to set not found." }
+
+    [PSCustomObject] $ftPath = ConvertTo-FtPath -Path:$Path;
+    [string] $allChildrenPath = "$($ftPath.ParentPath)${pdel}*";
+
+    $allChildren = ( Get-Node -Tree:$Tree -PatternPath:($allChildrenPath) | 
+        Sort-Object @{ Expression = { $_[$SA]["$([SysAttrKey]::Idx)"] } } | 
+        Select-Object @{ n='Path'; e = { $_[$SA]["$([SysAttrKey]::Path)"] } } )
+
+    foreach ($child in $allChildren) {
+        if ($child.Path -ne $Path) { $indexedList.Add($child.Path); }
+    }
+
+    [int] $currentPos = Get-AttributeValue -Node:$nodeToSet -Key:([SysAttrKey]::Idx) -System;
+    $setIdx = ($Position -eq [Position]::Unchanged) ? $currentPos : (($Position -eq [Position]::First) ? 0 : $indexedList.Count);
+    $setIdx += $Move;
+    if ($setIdx -lt 0) { $setIdx = 0; } elseif ($setIdx -gt $indexedList.Count) { $setIdx = $indexedList.Count }
+    if ($setIdx -lt $indexedList.Count) { $indexedList.Insert($setIdx, $Path) } else { $indexedList.Add($Path); }
+
+    foreach ($childPath in $indexedList) {
+        $childNode = $Tree[$childPath];
+        $childIdx = $indexedList.IndexOf($childPath);
+        Set-AttributeValue -Node:$childNode -Key:([SysAttrKey]::Idx) -Value:$childIdx -System;
+    }
+
+    if ($PassThru) { $nodeToSet | Write-Output; }
+}
+Export-ModuleMember -Function:Set-NodeIndex
+
 <#
     .SYNOPSIS
     Adds node to the Tree.
@@ -834,6 +879,8 @@ function Add-Node {
         [string] $newPath = "${ParentPath}${pdel}${nextId}";    
         Set-AttributeValue -Node:$copy -Key:([SysAttrKey]::Id) -Value:$nextId -System;
         Set-AttributeValue -Node:$copy -Key:([SysAttrKey]::Path) -Value:$newPath -System;
+        #   new node will be unindexed
+        Set-AttributeValue -Node:$copy -Key:([SysAttrKey]::Idx) -Value:-1 -System ;
         $Tree[$newPath] = $copy;
 
         #   increment parent's next id
