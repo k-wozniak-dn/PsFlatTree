@@ -2,7 +2,7 @@
 enum FileFormat {psd1; json; xml; csv; }
 enum NodeSection { SA; A; }
 enum SysAttrKey {
-    Path; Id; NodeName; NextChildId; Idx
+    Path; Id; NodeName; NextChildId; Idx; FilePath
 }
 enum Position {
     Unchanged; First; Last
@@ -13,7 +13,9 @@ Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
 
 Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
 Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
-$sysAttr = @([SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; [SysAttrKey]::Idx);
+$sysAttr = @(
+    [SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; 
+    [SysAttrKey]::Idx; [SysAttrKey]::FilePath);
 
 #endregion
 
@@ -774,31 +776,40 @@ function Set-NodeIndex {
         [switch] $PassThru
     )
 
+    # list to hold sibling paths ordered by Idx
     $indexedList = New-Object 'System.Collections.Generic.List[string]';
 
+    # node to set Idx
     [hashtable] $nodeToSet = Get-Node -Tree:$Tree -PatternPath:$Path;
     if (-not $nodeToSet) { throw "Node to set not found." }
 
     [PSCustomObject] $ftPath = ConvertTo-FtPath -Path:$Path;
     [string] $allChildrenPath = "$($ftPath.ParentPath)${pdel}*";
 
-    $allChildren = ( Get-Node -Tree:$Tree -PatternPath:($allChildrenPath) | 
+    # selecting siblings of the node to set Idx
+    [PSCustomObject[]] $allChildren = ( Get-Node -Tree:$Tree -PatternPath:($allChildrenPath) | 
         Sort-Object @{ Expression = { $_[$SA]["$([SysAttrKey]::Idx)"] } } | 
         Select-Object @{ n='Path'; e = { $_[$SA]["$([SysAttrKey]::Path)"] } } )
 
+    # load the list of siblings
     foreach ($child in $allChildren) {
+        # node to set excluded from the list
         if ($child.Path -ne $Path) { $indexedList.Add($child.Path); }
     }
 
+    # calculating Idx for node to set
     [int] $currentPos = Get-AttributeValue -Node:$nodeToSet -Key:([SysAttrKey]::Idx) -System;
-    $setIdx = ($Position -eq [Position]::Unchanged) ? $currentPos : (($Position -eq [Position]::First) ? 0 : $indexedList.Count);
+    [int] $setIdx = ($Position -eq [Position]::Unchanged) ? $currentPos : (($Position -eq [Position]::First) ? 0 : $indexedList.Count);
     $setIdx += $Move;
+    # protect against out of boundaries exception
     if ($setIdx -lt 0) { $setIdx = 0; } elseif ($setIdx -gt $indexedList.Count) { $setIdx = $indexedList.Count }
+    # inserting or adding node to set to the list at required position
     if ($setIdx -lt $indexedList.Count) { $indexedList.Insert($setIdx, $Path) } else { $indexedList.Add($Path); }
 
+    # resetting all siblings Idx according to the position on the list
     foreach ($childPath in $indexedList) {
-        $childNode = $Tree[$childPath];
-        $childIdx = $indexedList.IndexOf($childPath);
+        [hashtable] $childNode = $Tree[$childPath];
+        [int] $childIdx = $indexedList.IndexOf($childPath);
         Set-AttributeValue -Node:$childNode -Key:([SysAttrKey]::Idx) -Value:$childIdx -System;
     }
 
@@ -886,6 +897,9 @@ function Add-Node {
         #   increment parent's next id
         $nextId++;
         Set-AttributeValue -Node:$parent -Key:([SysAttrKey]::NextChildId) -Value:$nextId -System;
+
+        #   Set Idx of new node to Last
+        Set-NodeIndex -T:$Tree -Path:$newPath -Position:([Position]::Last);
 
         if ($PassThru) { $copy | Write-Output; }
     }
@@ -991,7 +1005,12 @@ function New-Tree {
     )
 
     [PSCustomObject] $root = New-Node -NodeName:"Root" ;
-    [hashtable] $tree = @{ '0' = $root }
+    [string] $rootPath = '0';
+    Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Id) -Value:0 -System;
+    Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Path) -Value:$rootPath -System;
+    Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Idx) -Value:0 -System;
+
+    [hashtable] $tree = @{ $rootPath = $root }
     return $tree
 }
 
@@ -1033,7 +1052,7 @@ function Import-Tree {
     }
     [hashtable] $root = Get-Node -Tree:$tree -PatternPath:'0';
     if (-not $root) { throw "Root not found." }
-    Set-AttributeValue -N:$root -K:([SysAttrKey]::Path) -V:($FileInfo.FullName) -System;
+    Set-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -V:($FileInfo.FullName) -System;
     return $tree;
 }
 
@@ -1144,7 +1163,7 @@ function Get-TreeContentPsd1 {
 
     .EXAMPLE
     PS> $tree = gi .\test.psd1 | iptree ;
-    PS> $tree | eptree -P:"./test-copy.psd1"    #   creating a copy, it's not the same as cp because file path is stored in root node
+    PS> $tree | eptree -F:"./test-copy.psd1"    #   creating a copy, it's not the same as cp because file path is stored in root node
 
 #>
 function Export-Tree {
@@ -1153,21 +1172,21 @@ function Export-Tree {
         [Parameter(ValueFromPipeline = $true)] 
         [hashtable] $Tree,
 
-        [Parameter(Mandatory = $false)] [Alias("P")] [string] $Path
+        [Parameter(Mandatory = $false)] [string] $FilePath
     )
 
     Process {
         [hashtable] $root = Get-Node -Tree:$Tree -PatternPath:'0';
 
-        if ( -not $Path) { 
-            $Path = (Get-AttributeValue -N:$root -K:([SysAttrKey]::Path) -System) 
+        if ( -not $FilePath) { 
+            $FilePath = (Get-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -System) 
         }
-        if (-not $Path) { throw "Path not specified." }
+        if (-not $FilePath) { throw "File Path not specified." }
 
-        [string] $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path);
-        Set-AttributeValue -N:$root -K:([SysAttrKey]::Path) -Value:$fullPath -System
+        [string] $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FilePath);
+        Set-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -Value:$fullPath -System
 
-        [string] $ext = [System.IO.Path]::GetExtension($Path);
+        [string] $ext = [System.IO.Path]::GetExtension($FilePath);
 
         switch ($ext) {
             { $_ -eq ("." + [FileFormat]::psd1) } { 
@@ -1177,8 +1196,8 @@ function Export-Tree {
             default { throw "File format '$ext' not supported." }
         }
 
-        Set-Content -Path:$Path -Value:$content;
-        Get-Item -Path:$Path;           
+        Set-Content -Path:$FilePath -Value:$content;
+        Get-Item -Path:$FilePath;           
     }
 }
 
