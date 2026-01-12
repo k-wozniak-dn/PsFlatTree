@@ -2,7 +2,7 @@
 enum FileFormat {psd1; json; xml; csv; }
 enum NodeSection { SA; A; }
 enum SysAttrKey {
-    Path; Id; NodeName; NextChildId; Idx; FilePath
+    Path; Id; NodeName; NextChildId; Idx; FilePath; TreeType; TreeId
 }
 enum Position {
     Unchanged; First; Last
@@ -15,7 +15,7 @@ Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
 Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
 $sysAttr = @(
     [SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; 
-    [SysAttrKey]::Idx; [SysAttrKey]::FilePath);
+    [SysAttrKey]::Idx; [SysAttrKey]::FilePath; [SysAttrKey]::TreeType; [SysAttrKey]::TreeId);
 
 #endregion
 
@@ -241,7 +241,7 @@ function Get-Attribute {
         else {
             if ($Node.$A.ContainsKey($Key)) 
             {
-                [PSCustomObject] @{ Key = $key; Value = $Node.$A[$key]; System = $false  } | Write-Output ; 
+                [PSCustomObject] @{ Key = $Key; Value = $Node.$A[$Key]; System = $false  } | Write-Output ; 
             }
         } 
     }
@@ -870,7 +870,8 @@ function Add-Node {
             [string] $nodePath = Get-AttributeValue -N:$copy -K:([SysAttrKey]::Path) -S;
             if (-not $nodePath) { throw "Undefined path." }
             [PSCustomObject] $nodeFtPath = ConvertTo-FtPath -Path:$nodePath;
-            [string] $ParentPath = $nodeFtPath.ParentPath ?? { throw "Undefined parent path." }
+            [string] $ParentPath = $nodeFtPath.ParentPath ;
+            if (-not $ParentPath) { throw "Undefined parent path." }
         }
 
         [hashtable] $parent = Get-Node -Tree:$Tree -PatternPath:$ParentPath;
@@ -1002,6 +1003,8 @@ Export-ModuleMember -Alias:rnode
 function New-Tree {
     [CmdletBinding()]
     param (
+        [Parameter(Mandatory = $false)] [string] $TreeType,
+        [Parameter(Mandatory = $false)] [string] $TreeId
     )
 
     [PSCustomObject] $root = New-Node -NodeName:"Root" ;
@@ -1009,6 +1012,9 @@ function New-Tree {
     Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Id) -Value:0 -System;
     Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Path) -Value:$rootPath -System;
     Set-AttributeValue -Node:$root -Key:([SysAttrKey]::Idx) -Value:0 -System;
+
+    if ($TreeType) { Set-AttributeValue -Node:$root -Key:([SysAttrKey]::TreeType) -Value:$TreeType -System; }
+    if ($TreeId) { Set-AttributeValue -Node:$root -Key:([SysAttrKey]::TreeId) -Value:$TreeId -System; }
 
     [hashtable] $tree = @{ $rootPath = $root }
     return $tree
@@ -1205,5 +1211,3 @@ Set-Alias -Name:eptree -Value:Export-Tree
 Export-ModuleMember -Function:Export-Tree
 Export-ModuleMember -Alias:eptree
 #endregion
-
-Write-Host "PsFlatTree Module imported."
