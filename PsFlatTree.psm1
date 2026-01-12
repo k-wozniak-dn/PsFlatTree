@@ -11,8 +11,8 @@ enum Position {
 # Path delimiter
 Set-Variable -Name 'pdel' -Value ':' -Option ReadOnly;
 
-Set-Variable -Name 'SA' -Value "$([NodeSection]::SA)" -Option ReadOnly;
-Set-Variable -Name 'A' -Value "$([NodeSection]::A)" -Option ReadOnly;
+Set-Variable -Name 'SA' -Value ([NodeSection]::SA.ToString()) -Option ReadOnly;
+Set-Variable -Name 'A' -Value ([NodeSection]::A.ToString()) -Option ReadOnly;
 $sysAttr = @(
     [SysAttrKey]::Path; [SysAttrKey]::Id; [SysAttrKey]::NodeName; [SysAttrKey]::NextChildId; 
     [SysAttrKey]::Idx; [SysAttrKey]::FilePath; [SysAttrKey]::TreeType; [SysAttrKey]::TreeId);
@@ -219,29 +219,29 @@ function Get-Attribute {
 
     if ($All) { 
         if ($System) {
-            foreach ($akey in $Node.$SA.Keys) 
+            foreach ($akey in $Node[$SA].Keys) 
             { 
-                [PSCustomObject] @{ Key = $akey; Value = $Node.$SA[$akey]; System = $true } | Write-Output ; 
+                [PSCustomObject] @{ Key = $akey; Value = $Node[$SA][$akey]; System = $true } | Write-Output ; 
             }            
         }
         else {
-            foreach ($akey in $Node.$A.Keys) 
+            foreach ($akey in $Node[$A].Keys) 
             { 
-                [PSCustomObject] @{ Key = $akey; Value = $Node.$A[$akey]; System = $false  } | Write-Output; 
+                [PSCustomObject] @{ Key = $akey; Value = $Node[$A][$akey]; System = $false  } | Write-Output; 
             }    
         }
     }
     else { 
         if ($System) {
-            if ($Node.$SA.ContainsKey($Key)) 
+            if ($Node[$SA].ContainsKey($Key)) 
             {
-                [PSCustomObject] @{ Key = $Key; Value = $Node.$SA[$Key]; System = $true  } | Write-Output ;     
+                [PSCustomObject] @{ Key = $Key; Value = $Node[$SA][$Key]; System = $true  } | Write-Output ;     
             }
         }
         else {
-            if ($Node.$A.ContainsKey($Key)) 
+            if ($Node[$A].ContainsKey($Key)) 
             {
-                [PSCustomObject] @{ Key = $Key; Value = $Node.$A[$Key]; System = $false  } | Write-Output ; 
+                [PSCustomObject] @{ Key = $Key; Value = $Node[$A][$Key]; System = $false  } | Write-Output ; 
             }
         } 
     }
@@ -330,9 +330,9 @@ function Test-Attribute {
 
         if ($AttributeInfo.System) 
         { 
-            if (-not $sysAttr.Contains([SysAttrKey]::($AttributeInfo.Key))) { throw "System Attribute Key not allowed." } 
+            if (-not $sysAttr.Contains([SysAttrKey]$AttributeInfo.Key)) { throw "System Attribute Key not allowed." } 
 
-            if ([SysAttrKey]::NodeName -eq [SysAttrKey]::($AttributeInfo.Key)) {
+            if ([SysAttrKey]::NodeName -eq [SysAttrKey]$AttributeInfo.Key) {
                 if ($AttributeInfo.Value -match '^[0-9]') { throw "Incorrect NodeName value." };
                 if ($AttributeInfo.Value.Contains($pdel)) { throw "Node name can't contain path delimiter." }
             }
@@ -421,10 +421,10 @@ function Set-Attribute {
     Process
     { 
         if ($AttributeInfo.System) {
-            $Node.$SA[$AttributeInfo.Key] = $AttributeInfo.Value; 
+            $Node[$SA][$AttributeInfo.Key] = $AttributeInfo.Value; 
         }
         else {
-            $Node.$A[$AttributeInfo.Key] = $AttributeInfo.Value; 
+            $Node[$A][$AttributeInfo.Key] = $AttributeInfo.Value; 
         }
 
         if ($PassThru) { $AttributeInfo | Write-Output; }
@@ -557,10 +557,10 @@ function Remove-Attribute {
         foreach ($ai in $toRemove) {
             if ($ai.System) {
                 Write-Error "Removing system attributes not allowed.";
-                # $Node.$SA.Remove($AttributeInfo.Key); 
+                # $Node[$SA].Remove($AttributeInfo.Key); 
             }
             else {
-                $Node.$A.Remove($ai.Key); 
+                $Node[$A].Remove($ai.Key); 
             }
 
             if ($PassThru) { $ai | Write-Output; }            
@@ -666,8 +666,8 @@ function ConvertTo-DescriptiveFtPath {
         [string] $subPath = $subArray -join $pdel;
         [hashtable] $node = $Tree[$subPath];
         if ($null -eq $node) { throw "Node not found." }
-        [string] $name = Get-AttributeValue -N:$node -K:([SysAttrKey]::NodeName) -S;
-        if (-not $name) { [string] $name = Get-AttributeValue -N:$node -K:([SysAttrKey]::Id) -S; }
+        [string] $name = Get-AttributeValue -Node:$node -Key:([SysAttrKey]::NodeName) -System;
+        if (-not $name) { [string] $name = Get-AttributeValue -Node:$node -Key:([SysAttrKey]::Id) -System; }
         $descriptivePathArray += $name;
     }
 
@@ -752,7 +752,7 @@ function Get-Node {
             [bool] $match = (Compare-FtPath -Pattern:$patternFtPath -Tested:$nodeFtPath -Recurse:$Recurse);
         } 
         elseif ($patternFtPath.Descriptive -eq $true) {
-            [PSCustomObject] $nodeDescriptiveFtPath = ConvertTo-DescriptiveFtPath -T:$Tree -Path:$nodeFtPath;
+            [PSCustomObject] $nodeDescriptiveFtPath = ConvertTo-DescriptiveFtPath -Tree:$Tree -Path:$nodeFtPath;
             [bool] $match = (Compare-FtPath -Pattern:$patternFtPath -Tested:$nodeDescriptiveFtPath -Recurse:$Recurse);
         }
         
@@ -780,16 +780,17 @@ function Set-NodeIndex {
     $indexedList = New-Object 'System.Collections.Generic.List[string]';
 
     # node to set Idx
-    [hashtable] $nodeToSet = Get-Node -Tree:$Tree -PatternPath:$Path;
+    $nodeToSet = Get-Node -Tree:$Tree -PatternPath:$Path;
     if (-not $nodeToSet) { throw "Node to set not found." }
+    if ($nodeToSet -isnot [hashtable]) { throw "Multiple nodes found for the path." }    
 
     [PSCustomObject] $ftPath = ConvertTo-FtPath -Path:$Path;
     [string] $allChildrenPath = "$($ftPath.ParentPath)${pdel}*";
 
     # selecting siblings of the node to set Idx
     [PSCustomObject[]] $allChildren = ( Get-Node -Tree:$Tree -PatternPath:($allChildrenPath) | 
-        Sort-Object @{ Expression = { $_[$SA]["$([SysAttrKey]::Idx)"] } } | 
-        Select-Object @{ n='Path'; e = { $_[$SA]["$([SysAttrKey]::Path)"] } } )
+        Sort-Object @{ Expression = { $_[$SA][[SysAttrKey]::Idx.ToString()] } } | 
+        Select-Object @{ n='Path'; e = { $_[$SA][[SysAttrKey]::Path.ToString()] } } )
 
     # load the list of siblings
     foreach ($child in $allChildren) {
@@ -867,27 +868,28 @@ function Add-Node {
         
         #   getting new node's parent; root must exist and can't be added; root is created when tree is created
         if (-not $ParentPath) {
-            [string] $nodePath = Get-AttributeValue -N:$copy -K:([SysAttrKey]::Path) -S;
+            [string] $nodePath = Get-AttributeValue -Node:$copy -Key:([SysAttrKey]::Path) -System;
             if (-not $nodePath) { throw "Undefined path." }
             [PSCustomObject] $nodeFtPath = ConvertTo-FtPath -Path:$nodePath;
             [string] $ParentPath = $nodeFtPath.ParentPath ;
             if (-not $ParentPath) { throw "Undefined parent path." }
         }
 
-        [hashtable] $parent = Get-Node -Tree:$Tree -PatternPath:$ParentPath;
+        $parent = Get-Node -Tree:$Tree -PatternPath:$ParentPath;
         if (-not $parent) { throw "Parent not found." }
+        if ($parent -isnot [hashtable]) { throw "Multiple nodes found for the path." }
 
         #   protect against adding node with the name which already exist 
-        [string] $copyName = Get-AttributeValue -N:$copy -K:([SysAttrKey]::NodeName) -S;
+        [string] $copyName = Get-AttributeValue -Node:$copy -Key:([SysAttrKey]::NodeName) -System;
         [hashtable[]] $allChilds = Get-Node -Tree:$Tree -PatternPath:("${ParentPath}${pdel}*");
         foreach ( $child in $allChilds)
         {
-            [string] $childName = Get-AttributeValue -Node:$child -K:([SysAttrKey]::NodeName) -S;
+            [string] $childName = Get-AttributeValue -Node:$child -Key:([SysAttrKey]::NodeName) -System;
             if ($copyName -eq $childName) { throw "Child with the same name already exists." }            
         }
 
         #   attaching new node to the tree
-        [int] $nextId = Get-AttributeValue -Node:$parent -Key:([SysAttrKey]::NextChildId) -S;
+        [int] $nextId = Get-AttributeValue -Node:$parent -Key:([SysAttrKey]::NextChildId) -System;
         [string] $newPath = "${ParentPath}${pdel}${nextId}";    
         Set-AttributeValue -Node:$copy -Key:([SysAttrKey]::Id) -Value:$nextId -System;
         Set-AttributeValue -Node:$copy -Key:([SysAttrKey]::Path) -Value:$newPath -System;
@@ -900,7 +902,7 @@ function Add-Node {
         Set-AttributeValue -Node:$parent -Key:([SysAttrKey]::NextChildId) -Value:$nextId -System;
 
         #   Set Idx of new node to Last
-        Set-NodeIndex -T:$Tree -Path:$newPath -Position:([Position]::Last);
+        Set-NodeIndex -Tree:$Tree -Path:$newPath -Position:([Position]::Last);
 
         if ($PassThru) { $copy | Write-Output; }
     }
@@ -968,7 +970,7 @@ function Remove-Node {
             $allChilds = Get-Node -Tree:$Tree -PatternPath:$Path -Recurse;
             foreach ($child in $allChilds) 
             { 
-                [string] $childPath = Get-AttributeValue -Node:$child -Key:([SysAttrKey]::Path) -S;
+                [string] $childPath = Get-AttributeValue -Node:$child -Key:([SysAttrKey]::Path) -System;
                 $keys += $childPath;
             }
         }
@@ -977,11 +979,11 @@ function Remove-Node {
     Process {
         if ($Node) 
         {
-            [string] $nodePath = Get-AttributeValue -Node:$Node -Key:([SysAttrKey]::Path) -S;
+            [string] $nodePath = Get-AttributeValue -Node:$Node -Key:([SysAttrKey]::Path) -System;
             [hashtable[]] $allChilds = Get-Node -Tree:$Tree -PatternPath:$nodePath -Recurse;
             foreach ($child in $allChilds) 
             { 
-                [string] $childPath = Get-AttributeValue -Node:$child -Key:([SysAttrKey]::Path) -S;
+                [string] $childPath = Get-AttributeValue -Node:$child -Key:([SysAttrKey]::Path) -System;
                 $keys += $childPath;
             }
         }
@@ -1056,9 +1058,11 @@ function Import-Tree {
             }
             default { throw "File format '$ext' not supported." }
     }
-    [hashtable] $root = Get-Node -Tree:$tree -PatternPath:'0';
+    $root = Get-Node -Tree:$tree -PatternPath:'0';
     if (-not $root) { throw "Root not found." }
-    Set-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -V:($FileInfo.FullName) -System;
+    if ($root -isnot [hashtable]) { throw "Multiple nodes found for the path." }
+
+    Set-AttributeValue -Node:$root -Key:([SysAttrKey]::FilePath) -V:($FileInfo.FullName) -System;
     return $tree;
 }
 
@@ -1117,14 +1121,14 @@ function Get-NodeLinesPsd1 {
     $output = New-Object 'System.Collections.Generic.List[string]';
     $output.Add("$("`t" * $offset)@{");
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($Node.$SA) -offset:($offset + 1));
+    $lines = (Get-AttributeLinesPsd1 -attr:($Node[$SA]) -offset:($offset + 1));
     if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${SA}' = " + $lines[0]); }
     else { 
         $output.Add("$("`t" * $offset)'${SA}' = ");
         $output.AddRange($lines); 
     }
 
-    $lines = (Get-AttributeLinesPsd1 -attr:($Node.$A) -offset:($offset + 1));
+    $lines = (Get-AttributeLinesPsd1 -attr:($Node[$A]) -offset:($offset + 1));
     if ($lines.Count -eq 1) { $output.Add("$("`t" * $offset)'${A}' = " + $lines[0]); }
     else { 
         $output.Add("$("`t" * $offset)'${A}' = ");
@@ -1182,15 +1186,17 @@ function Export-Tree {
     )
 
     Process {
-        [hashtable] $root = Get-Node -Tree:$Tree -PatternPath:'0';
+        $root = Get-Node -Tree:$Tree -PatternPath:'0';
+        if (-not $root) { throw "Root not found." }
+        if ($root -isnot [hashtable]) { throw "Multiple nodes found for the path." }
 
         if ( -not $FilePath) { 
-            $FilePath = (Get-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -System) 
+            $FilePath = (Get-AttributeValue -Node:$root -Key:([SysAttrKey]::FilePath) -System) 
         }
         if (-not $FilePath) { throw "File Path not specified." }
 
         [string] $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FilePath);
-        Set-AttributeValue -N:$root -K:([SysAttrKey]::FilePath) -Value:$fullPath -System
+        Set-AttributeValue -Node:$root -Key:([SysAttrKey]::FilePath) -Value:$fullPath -System
 
         [string] $ext = [System.IO.Path]::GetExtension($FilePath);
 
@@ -1202,7 +1208,7 @@ function Export-Tree {
             default { throw "File format '$ext' not supported." }
         }
 
-        Set-Content -Path:$FilePath -Value:$content;
+        Set-Content -Path:$FilePath -Value:$content -Encoding UTF8 -Force;
         Get-Item -Path:$FilePath;           
     }
 }
